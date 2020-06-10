@@ -32,7 +32,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         code_font = CreateFont(code_font_size, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, CLEARTYPE_QUALITY, 0, "Consolas");
 
-        editor_hwnd = CreateWindowEx(0, "plaatcode_editor", "", WS_VISIBLE | WS_CHILD, 0, menubar_size, window_width, window_height - menubar_size - statusbar_size, hwnd, NULL, GetModuleHandle(0), NULL);
+        editor_hwnd = CreateWindowEx(0, "plaatcode_editor", "", WS_VISIBLE | WS_CHILD,
+            0, menubar_size, window_width, window_height - menubar_size - statusbar_size, hwnd, NULL, GetModuleHandle(NULL), NULL);
         SendMessage(editor_hwnd, WM_SETFONT, (WPARAM)code_font, TRUE);
 
         EditorData *data = (EditorData *)GetWindowLongPtr(editor_hwnd, GWLP_USERDATA);

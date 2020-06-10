@@ -25,10 +25,12 @@ typedef struct EditorData {
     int lines_count;
 
     BOOL hscroll_down;
+    int hscroll_viewport;
     int hscroll_offset;
     int hscroll_size;
 
     BOOL vscroll_down;
+    int vscroll_viewport;
     int vscroll_offset;
     int vscroll_size;
 

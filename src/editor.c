@@ -3,6 +3,10 @@
 
 #include "editor.h"
 
+#ifndef WM_MOUSEHWHEEL
+#define WM_MOUSEHWHEEL 0x020E
+#endif
+
 #ifndef GET_X_LPARAM
 #define GET_X_LPARAM(lParam) ((int)(short)LOWORD(lParam))
 #endif
@@ -23,6 +27,29 @@ char *file_read(char *path) {
 }
 
 void calculate_scroll(HWND hwnd, EditorData *data) {
+    // Calculate line numbers size
+    int number_size = log10(data->lines_count + 1) + 1;
+
+    char test_buffer[sizeof(data->line_numbers_format_string)];
+    for (int i = 0; i < number_size; i++) {
+        test_buffer[i] = '0';
+    }
+    test_buffer[number_size] = '\0';
+
+    HDC hdc = GetDC(hwnd);
+    SelectObject(hdc, data->font);
+    SIZE line_metrics;
+    GetTextExtentPoint(hdc, test_buffer, number_size + 1, &line_metrics);
+    data->line_numbers_width = data->padding + line_metrics.cx + data->padding;
+
+    wsprintf(data->line_numbers_format_string, "%%%dd", number_size);
+
+    // Calculate horizontal scroll viewport
+    data->hscroll_viewport = data->width - data->line_numbers_width - data->scrollbar_size;
+
+    // Calculate vertical scroll viewport
+    data->vscroll_viewport = data->height;
+
     // Calculate horizontal scroll size
     char *largest_line = data->lines[0];
     int largest_line_size = lstrlen(data->lines[0]);
@@ -35,29 +62,21 @@ void calculate_scroll(HWND hwnd, EditorData *data) {
         }
     }
 
-    HDC hdc = GetDC(hwnd);
-    SelectObject(hdc, data->font);
-    SIZE line_metrics;
     GetTextExtentPoint(hdc, largest_line, largest_line_size, &line_metrics);
     data->hscroll_size = data->padding + line_metrics.cx + data->padding;
 
     // Calculate vertical scroll size
     data->vscroll_size = data->padding + data->font_size * data->lines_count +
-        data->padding + (data->height - data->font_size - data->padding);
+        data->padding + (data->vscroll_viewport - data->font_size - data->padding);
 
-    // Calculate line numbers size
-    int number_size = log10(data->lines_count + 1) + 1;
+    // Calculate horizontal scroll offset
+    if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
+        data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
 
-    char test_buffer[sizeof(data->line_numbers_format_string)];
-    for (int i = 0; i < number_size; i++) {
-        test_buffer[i] = '0';
+        if (data->hscroll_offset < 0) {
+            data->hscroll_offset = 0;
+        }
     }
-    test_buffer[number_size] = '\0';
-
-    GetTextExtentPoint(hdc, test_buffer, number_size + 1, &line_metrics);
-    data->line_numbers_width = data->padding + line_metrics.cx + data->padding;
-
-    wsprintf(data->line_numbers_format_string, "%%%dd", number_size);
 }
 
 LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -177,41 +196,41 @@ LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         if (
             xPos >= data->line_numbers_width && xPos < data->width - data->scrollbar_size &&
-            yPos >= data->height - data->scrollbar_size
+            yPos >= data->vscroll_viewport - data->scrollbar_size
         ) {
             data->hscroll_down = TRUE;
             SetCapture(hwnd);
 
-            int hscrollbar_width = data->width - data->line_numbers_width - data->scrollbar_size;
-
-            data->hscroll_offset = (xPos - (hscrollbar_width * hscrollbar_width / data->hscroll_size / 2)) * data->hscroll_size / hscrollbar_width;
+            data->hscroll_offset = (xPos - (data->hscroll_viewport * data->hscroll_viewport / data->hscroll_size / 2)) * data->hscroll_size / data->hscroll_viewport;
 
             if (data->hscroll_offset < 0) {
                 data->hscroll_offset = 0;
             }
 
-            if (data->hscroll_offset + hscrollbar_width > data->hscroll_size) {
-                data->hscroll_offset = data->hscroll_size - hscrollbar_width;
+            if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
+                data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
             }
 
             InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
         }
 
         if (xPos >= data->width - data->scrollbar_size) {
             data->vscroll_down = TRUE;
             SetCapture(hwnd);
 
-            data->vscroll_offset = (yPos - (data->height * data->height / data->vscroll_size / 2)) * data->vscroll_size / data->height;
+            data->vscroll_offset = (yPos - (data->vscroll_viewport * data->vscroll_viewport / data->vscroll_size / 2)) * data->vscroll_size / data->vscroll_viewport;
 
             if (data->vscroll_offset < 0) {
                 data->vscroll_offset = 0;
             }
 
-            if (data->vscroll_offset + data->height > data->vscroll_size) {
-                data->vscroll_offset = data->vscroll_size - data->height;
+            if (data->vscroll_offset + data->vscroll_viewport > data->vscroll_size) {
+                data->vscroll_offset = data->vscroll_size - data->vscroll_viewport;
             }
 
             InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
         }
 
         return 0;
@@ -222,30 +241,28 @@ LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         int yPos = GET_Y_LPARAM(lParam);
 
         if (data->hscroll_down && xPos >= data->line_numbers_width && xPos < data->width - data->scrollbar_size) {
-            int hscrollbar_width = data->width - data->line_numbers_width - data->scrollbar_size;
-
-            data->hscroll_offset = (xPos - (hscrollbar_width * hscrollbar_width / data->hscroll_size / 2)) * data->hscroll_size / hscrollbar_width;
+            data->hscroll_offset = (xPos - (data->hscroll_viewport * data->hscroll_viewport / data->hscroll_size / 2)) * data->hscroll_size / data->hscroll_viewport;
 
             if (data->hscroll_offset < 0) {
                 data->hscroll_offset = 0;
             }
 
-            if (data->hscroll_offset + hscrollbar_width > data->hscroll_size) {
-                data->hscroll_offset = data->hscroll_size - hscrollbar_width;
+            if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
+                data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
             }
 
             InvalidateRect(hwnd, NULL, FALSE);
         }
 
-        if (data->vscroll_down && yPos >= 0 && yPos < data->height) {
-            data->vscroll_offset = (yPos - (data->height * data->height / data->vscroll_size / 2)) * data->vscroll_size / data->height;
+        if (data->vscroll_down && yPos >= 0 && yPos < data->vscroll_viewport) {
+            data->vscroll_offset = (yPos - (data->vscroll_viewport * data->vscroll_viewport / data->vscroll_size / 2)) * data->vscroll_size / data->vscroll_viewport;
 
             if (data->vscroll_offset < 0) {
                 data->vscroll_offset = 0;
             }
 
-            if (data->vscroll_offset + data->height > data->vscroll_size) {
-                data->vscroll_offset = data->vscroll_size - data->height;
+            if (data->vscroll_offset + data->vscroll_viewport > data->vscroll_size) {
+                data->vscroll_offset = data->vscroll_size - data->vscroll_viewport;
             }
 
             InvalidateRect(hwnd, NULL, FALSE);
@@ -275,8 +292,23 @@ LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             data->vscroll_offset = 0;
         }
 
-        if (data->vscroll_offset + data->height > data->vscroll_size) {
-            data->vscroll_offset = data->vscroll_size - data->height;
+        if (data->vscroll_offset + data->vscroll_viewport > data->vscroll_size) {
+            data->vscroll_offset = data->vscroll_size - data->vscroll_viewport;
+        }
+
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    }
+
+    if (msg == WM_MOUSEHWHEEL) {
+        data->hscroll_offset += GET_WHEEL_DELTA_WPARAM(wParam);
+
+        if (data->hscroll_offset < 0) {
+            data->hscroll_offset = 0;
+        }
+
+        if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
+            data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
         }
 
         InvalidateRect(hwnd, NULL, FALSE);
@@ -356,28 +388,25 @@ LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
         // Draw horizontal scrollbar
         if (data->hscroll_size > data->width) {
-            RECT scrollbar_rect = { data->line_numbers_width, data->height - data->scrollbar_size, data->width - data->scrollbar_size, data->height };
+            RECT hscrollbar_rect = { data->line_numbers_width, data->height - data->scrollbar_size, data->width - data->scrollbar_size, data->height };
             SetBkColor(hdcMem, data->scrollbar_background_color);
-            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &scrollbar_rect, "", 0, NULL);
+            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &hscrollbar_rect, "", 0, NULL);
 
-            int hscrollbar_width = data->width - data->line_numbers_width - data->scrollbar_size;
-            int x = hscrollbar_width * data->hscroll_offset / data->hscroll_size;
-            RECT scrollbar_thumb_rect = { data->line_numbers_width + x, data->height - data->scrollbar_size, x + hscrollbar_width * hscrollbar_width / data->hscroll_size, data->height };
+            int x = data->hscroll_viewport * data->hscroll_offset / data->hscroll_size;
+            RECT hscrollbar_thumb_rect = { data->line_numbers_width + x, data->height - data->scrollbar_size, data->line_numbers_width + x + data->hscroll_viewport * data->hscroll_viewport / data->hscroll_size, data->height };
             SetBkColor(hdcMem, data->scrollbar_thumb_background_color);
-            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &scrollbar_thumb_rect, "", 0, NULL);
+            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &hscrollbar_thumb_rect, "", 0, NULL);
         }
 
         // Draw vertical scrollbar
-        if (data->vscroll_size > data->height) {
-            RECT scrollbar_rect = { data->width - data->scrollbar_size, 0, data->width, data->height };
-            SetBkColor(hdcMem, data->scrollbar_background_color);
-            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &scrollbar_rect, "", 0, NULL);
+        RECT vscrollbar_rect = { data->width - data->scrollbar_size, 0, data->width, data->vscroll_viewport };
+        SetBkColor(hdcMem, data->scrollbar_background_color);
+        ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &vscrollbar_rect, "", 0, NULL);
 
-            int y = data->height * data->vscroll_offset / data->vscroll_size;
-            RECT scrollbar_thumb_rect = { data->width - data->scrollbar_size, y, data->width, y + data->height * data->height / data->vscroll_size };
-            SetBkColor(hdcMem, data->scrollbar_thumb_background_color);
-            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &scrollbar_thumb_rect, "", 0, NULL);
-        }
+        int y = data->vscroll_viewport * data->vscroll_offset / data->vscroll_size;
+        RECT vscrollbar_thumb_rect = { data->width - data->scrollbar_size, y, data->width, y +data->vscroll_viewport * data->vscroll_viewport / data->vscroll_size };
+        SetBkColor(hdcMem, data->scrollbar_thumb_background_color);
+        ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &vscrollbar_thumb_rect, "", 0, NULL);
 
         // Blit double buffer
         BitBlt(hdc, 0, 0, data->width, data->height, hdcMem, 0, 0, SRCCOPY);
@@ -398,7 +427,7 @@ void InitEditorControl(void) {
     WNDCLASSEX wc = { 0 };
     wc.cbSize = sizeof(wc);
     wc.lpszClassName = "plaatcode_editor";
-    wc.hInstance = GetModuleHandle(0);
+    wc.hInstance = GetModuleHandle(NULL);
     wc.lpfnWndProc = EditorWndProc;
     wc.hCursor = LoadCursor (NULL, IDC_ARROW);
     wc.hbrBackground = NULL;
