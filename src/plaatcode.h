@@ -5,8 +5,14 @@
 
 #define ID_MENU 2000
 
-#define ID_FILE_EXIT 2100
+#define ID_FILE_NEW 2100
+#define ID_FILE_OPEN 2101
+#define ID_FILE_SAVE 2102
+#define ID_FILE_SAVE_AS 2103
+#define ID_FILE_EXIT 2104
 
 #define ID_HELP_ABOUT 2200
+
+#define ID_ACCELERATOR 3000
 
 #endif

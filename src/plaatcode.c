@@ -77,6 +77,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_COMMAND || msg == WM_SYSCOMMAND) {
         int id = LOWORD(wParam);
 
+        if (id == ID_FILE_NEW) {
+
+        }
+
+        if (id == ID_FILE_OPEN) {
+
+        }
+
+        if (id == ID_FILE_SAVE) {
+
+        }
+
+        if (id == ID_FILE_SAVE_AS) {
+
+        }
+
         if (id == ID_FILE_EXIT) {
             DestroyWindow(hwnd);
         }
@@ -159,6 +175,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(ID_ICON), IMAGE_ICON, 16, 16, 0);
     RegisterClassEx(&wc);
 
+    HACCEL hAccelerators = LoadAccelerators(hInstance, MAKEINTRESOURCE(ID_ACCELERATOR));
+
     HWND hwnd = CreateWindowEx(WS_EX_ACCEPTFILES, window_class_name, "PlaatCode",
         WS_OVERLAPPEDWINDOW, 0, 0, window_width, window_height, NULL, NULL, hInstance, NULL);
     ShowWindow(hwnd, nCmdShow);
@@ -166,8 +184,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     MSG message;
     while (GetMessage(&message, NULL, 0, 0) > 0) {
-        TranslateMessage(&message);
-        DispatchMessage(&message);
+        if (!TranslateAccelerator(message.hwnd, hAccelerators, &message)) {
+            TranslateMessage(&message);
+            DispatchMessage(&message);
+        }
     }
     return message.wParam;
 }
