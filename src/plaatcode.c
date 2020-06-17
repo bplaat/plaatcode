@@ -1,5 +1,9 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <commctrl.h>
+#include <shellapi.h>
 
+#include "plaatcode.h"
 #include "editor.h"
 
 COLORREF window_background_color = RGB(30, 30, 30);
@@ -22,6 +26,10 @@ HWND editor_hwnd;
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_CREATE) {
+        HMENU systemMenu = GetSystemMenu(hwnd, FALSE);
+        InsertMenu(systemMenu, 5, MF_BYPOSITION | MF_SEPARATOR, 0, NULL);
+        InsertMenu(systemMenu, 6, MF_BYPOSITION, ID_HELP_ABOUT, "About");
+
         RECT rect;
         GetClientRect(hwnd, &rect);
         int new_width = window_width * 2 - rect.right;
@@ -64,6 +72,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     if (msg == WM_ERASEBKGND) {
         return TRUE;
+    }
+
+    if (msg == WM_COMMAND || msg == WM_SYSCOMMAND) {
+        int id = LOWORD(wParam);
+
+        if (id == ID_FILE_EXIT) {
+            DestroyWindow(hwnd);
+        }
+
+        if (id == ID_HELP_ABOUT) {
+            MessageBox(hwnd, "A simple code editor made by PlaatSoft for Windows\nMade by Bastiaan van der Plaat (https://bastiaan.ml/)", "About PlaatCode", MB_ICONINFORMATION | MB_OK);
+        }
     }
 
     if (msg == WM_PAINT) {
@@ -122,16 +142,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     (void)hPrevInstance;
     (void)lpCmdLine;
 
+    INITCOMMONCONTROLSEX icc;
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_WIN95_CLASSES;
+    InitCommonControlsEx(&icc);
+
     WNDCLASSEX wc = { 0 };
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.style =  CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(ID_ICON));
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = NULL;
+    wc.lpszMenuName = MAKEINTRESOURCE(ID_MENU);
     wc.lpszClassName = window_class_name;
-    wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(ID_ICON), IMAGE_ICON, 16, 16, 0);
     RegisterClassEx(&wc);
 
     HWND hwnd = CreateWindowEx(WS_EX_ACCEPTFILES, window_class_name, "PlaatCode",

@@ -1,5 +1,5 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <math.h>
 
 #include "editor.h"
 
@@ -28,7 +28,12 @@ char *file_read(char *path) {
 
 void calculate_scroll(HWND hwnd, EditorData *data) {
     // Calculate line numbers size
-    int number_size = log10(data->lines_count + 1) + 1;
+    int number_size = 1;
+    int c = data->lines_count;
+    while (c > 10) {
+        c /= 10;
+        number_size++;
+    }
 
     char test_buffer[sizeof(data->line_numbers_format_string)];
     for (int i = 0; i < number_size; i++) {

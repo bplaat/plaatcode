@@ -1,2 +1,2 @@
 # bplaat/plaatcode
-An experimental text / code editor for Windows using pure Win32 code
+A simple code editor made by PlaatSoft for Windows
