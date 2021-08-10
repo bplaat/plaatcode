@@ -1,240 +1,352 @@
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include "editor.h"
+#include "lexers.h"
 
-#ifndef WM_MOUSEHWHEEL
-#define WM_MOUSEHWHEEL 0x020E
-#endif
-
-#ifndef GET_X_LPARAM
-#define GET_X_LPARAM(lParam) ((int)(short)LOWORD(lParam))
-#endif
-
-#ifndef GET_Y_LPARAM
-#define GET_Y_LPARAM(lParam) ((int)(short)HIWORD(lParam))
-#endif
-
-char *file_read(char *path) {
-    HANDLE file = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-    int file_size = GetFileSize(file, 0);
-    char *file_buffer = malloc(file_size + 1);
-    DWORD numRead;
-    ReadFile(file, file_buffer, file_size, &numRead, 0);
-    CloseHandle(file);
-    file_buffer[file_size] = '\0';
-    return file_buffer;
-}
-
-void calculate_scroll(HWND hwnd, EditorData *data) {
-    // Calculate line numbers size
-    int number_size = 1;
-    int c = data->lines_count;
+void UpdateLines(EditorData *editor) {
+    // Generate line number format string
+    int32_t line_number_size = 1;
+    int32_t c = editor->lines_size;
     while (c > 10) {
         c /= 10;
-        number_size++;
+        line_number_size++;
+    }
+    if (editor->debug) {
+        wsprintfW(editor->line_numbers_format, L"%%0%dd %%03d/%%03d", line_number_size);
+    } else {
+        wsprintfW(editor->line_numbers_format, L"%%0%dd", line_number_size);
     }
 
-    char test_buffer[sizeof(data->line_numbers_format_string)];
-    for (int i = 0; i < number_size; i++) {
-        test_buffer[i] = '0';
+    // Measure line number width
+    HDC hdc = GetDC(NULL);
+    SelectObject(hdc, editor->font);
+    wchar_t line_number_buffer[32];
+    if (editor->debug) {
+        wsprintfW(line_number_buffer, editor->line_numbers_format, 0, 0, 0);
+    } else {
+        wsprintfW(line_number_buffer, editor->line_numbers_format, 0);
     }
-    test_buffer[number_size] = '\0';
-
-    HDC hdc = GetDC(hwnd);
-    SelectObject(hdc, data->font);
-    SIZE line_metrics;
-    GetTextExtentPoint(hdc, test_buffer, number_size + 1, &line_metrics);
-    data->line_numbers_width = data->padding + line_metrics.cx + data->padding;
-
-    wsprintf(data->line_numbers_format_string, "%%%dd", number_size);
-
-    // Calculate horizontal scroll viewport
-    data->hscroll_viewport = data->width - data->line_numbers_width - data->scrollbar_size;
-
-    // Calculate vertical scroll viewport
-    data->vscroll_viewport = data->height;
-
-    // Calculate horizontal scroll size
-    char *largest_line = data->lines[0];
-    int largest_line_size = lstrlen(data->lines[0]);
-
-    for (int i = 0; i < data->lines_count; i++) {
-        int new_line_size = lstrlen(data->lines[i]);
-        if (new_line_size > largest_line_size) {
-            largest_line = data->lines[i];
-            largest_line_size = new_line_size;
-        }
-    }
-
-    GetTextExtentPoint(hdc, largest_line, largest_line_size, &line_metrics);
-    data->hscroll_size = data->padding + line_metrics.cx + data->padding;
-
-    // Calculate vertical scroll size
-    data->vscroll_size = data->padding + data->font_size * data->lines_count +
-        data->padding + (data->vscroll_viewport - data->font_size - data->padding);
-
-    // Calculate horizontal scroll offset
-    if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
-        data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
-
-        if (data->hscroll_offset < 0) {
-            data->hscroll_offset = 0;
-        }
-    }
+    SIZE measure_size;
+    GetTextExtentPoint32W(hdc, line_number_buffer, wcslen(line_number_buffer), &measure_size);
+    DeleteDC(hdc);
+    editor->line_numbers_width = editor->padding + (measure_size.cx) + editor->padding;
 }
 
-LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    EditorData *data = (EditorData *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+void UpdateScroll(EditorData *editor) {
+    // Calculate horizontal scroll viewport
+    editor->hscroll_viewport = editor->width - editor->line_numbers_width - editor->scrollbar_size;
+
+    // Calculate horizontal scroll size
+    int32_t largest_line = 0;
+    for (int32_t i = 1; i < editor->lines_size; i++) {
+        if (editor->lines[i]->size > editor->lines[largest_line]->size) {
+            largest_line = i;
+        }
+    }
+
+    HDC hdc = GetDC(NULL);
+    SelectObject(hdc, editor->font);
+    SIZE measure_size;
+    GetTextExtentPoint32W(hdc, editor->lines[largest_line]->text, editor->lines[largest_line]->size, &measure_size);
+    editor->hscroll_size = measure_size.cx + editor->padding;
+    DeleteDC(hdc);
+
+    // Calculate horizontal scroll offset
+    if (editor->hscroll_offset + editor->hscroll_viewport > editor->hscroll_size) {
+        editor->hscroll_offset = editor->hscroll_size - editor->hscroll_viewport;
+
+        if (editor->hscroll_offset < 0) {
+            editor->hscroll_offset = 0;
+        }
+    }
+
+    // Calculate vertical scroll viewport
+    editor->vscroll_viewport = editor->height;
+
+    // Calculate vertical scroll size
+    editor->vscroll_size = editor->font_size * editor->lines_size +
+        (editor->vscroll_viewport - editor->font_size);
+}
+
+int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam) {
+    EditorData *editor = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
 
     if (msg == WM_CREATE) {
-        data = malloc(sizeof(EditorData));
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)data);
+        // Create editor data
+        editor = malloc(sizeof(EditorData));
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, editor);
+        #ifdef DEBUG
+            editor->debug = true;
+        #else
+            editor->debug = false;
+        #endif
 
-        RECT editor_rect;
-        GetClientRect(hwnd, &editor_rect);
-        data->width = editor_rect.right;
-        data->height = editor_rect.bottom;
+        editor->background_color = 0x00342C28;
+        editor->scrollbar_background_color = 0x0066564E;
+        editor->scrollbar_thumb_background_color = 0x00917D74;
+        editor->line_numbers_text_color = 0x00836D63;
+        editor->line_numbers_active_text_color = 0x00BFB2AB;
+        editor->token_normal_text_color = 0x00BFB2AB;
+        editor->token_space_text_color = 0x00555555;
+        editor->token_comment_text_color = 0x0070635C;
+        editor->token_keyword_text_color = 0x00DD78C6;
+        editor->token_constant_text_color = 0x00669AD1;
+        editor->token_string_text_color = 0x0079C398;
 
-        data->font = GetStockObject(ANSI_FIXED_FONT);
-        HDC hdc = GetDC(hwnd);
-        SelectObject(hdc, data->font);
-        TEXTMETRIC tm;
-        GetTextMetrics(hdc, &tm);
-        data->font_size = tm.tmHeight;
+        editor->font_name = L"Consolas";
+        editor->font_size = 20;
+        editor->font = CreateFontW(editor->font_size, 0, 0, 0, FW_NORMAL, false, false, false, ANSI_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, editor->font_name);
 
-        data->scrollbar_size = 16;
-        data->padding = 8;
+        editor->indentation_character = ' ';
+        editor->indentation_size = 4;
 
-        data->lines = malloc(sizeof(char *));
-        data->lines[0] = "";
-        data->lines_count = 1;
+        editor->path = NULL;
 
-        data->hscroll_down = FALSE;
-        data->hscroll_offset = 0;
-        data->hscroll_size = 0;
+        // Create lines with one empty line
+        editor->lines_capacity = 128;
+        editor->lines_size = 0;
+        editor->lines = malloc(sizeof(EditorLine *) * editor->lines_capacity);
 
-        data->vscroll_down = FALSE;
-        data->vscroll_offset = 0;
-        data->vscroll_size = 0;
+        EditorLine *line = malloc(sizeof(EditorLine));
+        line->capacity = 128;
+        line->size = 0;
+        line->text = malloc(sizeof(wchar_t) * line->capacity);
+        editor->lines[editor->lines_size++] = line;
+
+        editor->scrollbar_size = 16;
+        editor->padding = 16;
+        editor->line_numbers_format = malloc(sizeof(wchar_t) * 32);
+        editor->hscroll_offset = 0;
+        editor->hscroll_down = false;
+        editor->vscroll_offset = 0;
+        editor->vscroll_down = false;
+
+        editor->cursor_x = 0;
+        editor->cursor_y = 0;
+
         return 0;
     }
 
     if (msg == WM_EDITOR_OPEN_FILE) {
-        char *file_buffer = file_read((char *)wParam);
-
-        // Count lines
-        data->lines_count = 0;
-        char *c = file_buffer;
-        for (;;) {
-            if (*c == '\n') {
-                data->lines_count++;
-            }
-
-            if (*c == '\r' && *(c + 1) == '\n') {
-                data->lines_count++;
-                c++;
-            }
-
-            if (*c == '\0') {
-                data->lines_count++;
-                break;
-            }
-
-            c++;
+        // Free old lines
+        for (int32_t i = 0; i < editor->lines_size; i++) {
+            free(editor->lines[i]->text);
+            free(editor->lines[i]);
         }
+        free(editor->lines);
 
-        // Read lines
-        data->lines = malloc(data->lines_count * sizeof(char *));
+        // Allocate new lines list
+        editor->lines_capacity = 128;
+        editor->lines_size = 0;
+        editor->lines = malloc(sizeof(EditorLine *) * editor->lines_capacity);
 
-        char *current = file_buffer;
+        // Reset cursor
+        editor->cursor_x = 0;
+        editor->cursor_y = 0;
 
-        for (int i = 0; i < data->lines_count; i++) {
-            // Get line length
-            char *end = current;
-            while (!(*end == '\0' || *end == '\n' || (*end == '\r' && *(end + 1) == '\n'))) {
-                end++;
+        // New file
+        if (wParam == NULL) {
+            if (editor->path != NULL) {
+                free(editor->path);
             }
+            editor->path = NULL;
 
-            char *line = malloc(end - current + 1);
-            data->lines[i] = line;
+            EditorLine *line = malloc(sizeof(EditorLine));
+            line->capacity = 128;
+            line->size = 0;
+            line->text = malloc(sizeof(wchar_t) * line->capacity);
+            editor->lines[editor->lines_size++] = line;
 
-            char *text = current;
-            while (text != end) {
-                *line++ = *text++;
-            }
-            *line = '\0';
-
-            if (*end == '\n') {
-                end++;
-            }
-
-            if (*end == '\r' && *(end + 1) == '\n') {
-                end += 2;
-            }
-
-            current = end;
-        }
-
-        free(file_buffer);
-
-        data->hscroll_offset = 0;
-        data->vscroll_offset = 0;
-
-        calculate_scroll(hwnd, data);
-
-        InvalidateRect(hwnd, NULL, FALSE);
-
-        return 0;
-    }
-
-    if (msg == WM_SIZE) {
-        data->width = LOWORD(lParam);
-        data->height = HIWORD(lParam);
-
-        calculate_scroll(hwnd, data);
-    }
-
-    if (msg == WM_LBUTTONDOWN) {
-        int xPos = GET_X_LPARAM(lParam);
-        int yPos = GET_Y_LPARAM(lParam);
-
-        if (
-            xPos >= data->line_numbers_width && xPos < data->width - data->scrollbar_size &&
-            yPos >= data->vscroll_viewport - data->scrollbar_size
-        ) {
-            data->hscroll_down = TRUE;
-            SetCapture(hwnd);
-
-            data->hscroll_offset = (xPos - (data->hscroll_viewport * data->hscroll_viewport / data->hscroll_size / 2)) * data->hscroll_size / data->hscroll_viewport;
-
-            if (data->hscroll_offset < 0) {
-                data->hscroll_offset = 0;
-            }
-
-            if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
-                data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
-            }
-
-            InvalidateRect(hwnd, NULL, FALSE);
+            editor->hscroll_offset = 0;
+            editor->vscroll_offset = 0;
+            InvalidateRect(hwnd, NULL, false);
             return 0;
         }
 
-        if (xPos >= data->width - data->scrollbar_size) {
-            data->vscroll_down = TRUE;
+        // Get full file path
+        wchar_t path[MAX_PATH];
+        GetFullPathNameW(wParam, MAX_PATH, path, NULL);
+
+        // Read file
+        HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (file != INVALID_HANDLE_VALUE) {
+            if (editor->path != NULL) {
+                free(editor->path);
+            }
+            editor->path = wcsdup(path);
+
+            uint32_t file_size = GetFileSize(file, NULL);
+            char *file_buffer = malloc(file_size);
+            uint32_t bytes_read;
+            ReadFile(file, file_buffer, file_size, &bytes_read, 0);
+            CloseHandle(file);
+
+            int32_t converted_size = MultiByteToWideChar(CP_ACP, 0, file_buffer, file_size, NULL, 0);
+            wchar_t *converted_buffer = malloc(sizeof(wchar_t) * converted_size);
+            MultiByteToWideChar(CP_ACP, 0, file_buffer, bytes_read, converted_buffer, converted_size);
+            free(file_buffer);
+
+            // Create line
+            EditorLine *line = malloc(sizeof(EditorLine));
+            line->capacity = 128;
+            line->size = 0;
+            line->text = malloc(sizeof(wchar_t) * line->capacity);
+
+            wchar_t *current = converted_buffer;
+            while (*current != '\0') {
+                if (*current == '\r') {
+                    current++;
+                }
+                if (*current == '\n') {
+                    // Add line to lines
+                    if (editor->lines_size == editor->lines_capacity) {
+                        editor->lines_capacity *= 2;
+                        editor->lines = realloc(editor->lines, sizeof(EditorLine *) * editor->lines_capacity);
+                    }
+                    editor->lines[editor->lines_size++] = line;
+
+                    // Create a new line
+                    line = malloc(sizeof(EditorLine));
+                    line->capacity = 128;
+                    line->size = 0;
+                    line->text = malloc(sizeof(wchar_t) * line->capacity);
+
+                    current++;
+                } else {
+                    // Add character to current line
+                    if (line->size == line->capacity) {
+                        line->capacity *= 2;
+                        line->text = realloc(line->text, sizeof(wchar_t) * line->capacity);
+                    }
+                    line->text[line->size++] = *current++;
+                }
+            }
+
+            free(converted_buffer);
+            editor->hscroll_offset = 0;
+            editor->vscroll_offset = 0;
+            InvalidateRect(hwnd, NULL, false);
+        } else {
+            MessageBoxW(HWND_DESKTOP, path, L"Can't open file", MB_OK);
+        }
+        return 0;
+    }
+
+    if (msg == WM_EDITOR_CHANGE_PATH) {
+        // Get full file path
+        wchar_t path[MAX_PATH];
+        GetFullPathNameW(wParam, MAX_PATH, path, NULL);
+
+        if (editor->path != NULL) {
+            free(editor->path);
+        }
+        editor->path = wcsdup(path);
+    }
+
+    if (msg == WM_EDITOR_SAVE_FILE) {
+        HANDLE file = CreateFileW(editor->path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file != INVALID_HANDLE_VALUE) {
+            // Insert final empty line
+            if (editor->lines[editor->lines_size - 1]->size > 0) {
+                EditorLine *line = malloc(sizeof(EditorLine));
+                line->capacity = 128;
+                line->size = 0;
+                line->text = malloc(sizeof(wchar_t) * line->capacity);
+                if (editor->lines_size == editor->lines_capacity) {
+                    editor->lines_capacity *= 2;
+                    editor->lines = realloc(editor->lines, sizeof(EditorLine *) * editor->lines_capacity);
+                }
+                editor->lines[editor->lines_size++] = line;
+            }
+
+            // Count largest line
+            int32_t largest_line_capacity = editor->lines[0]->capacity;
+            for (int32_t i = 0; i < editor->lines_size; i++) {
+                if (editor->lines[i]->capacity > largest_line_capacity) {
+                    largest_line_capacity = editor->lines[i]->capacity;
+                }
+            }
+
+            char *convert_buffer = malloc(sizeof(wchar_t) * largest_line_capacity * 2);
+            for (int32_t i = 0; i < editor->lines_size; i++) {
+                EditorLine *line = editor->lines[i];
+
+                // Trim trailing whitespace
+                int32_t trimming = 0;
+                for (int32_t j = line->size - 1; j >= 0; j--) {
+                    if (line->text[j] == ' ') {
+                        trimming++;
+                    } else {
+                        break;
+                    }
+                }
+                line->size -= trimming;
+                if (editor->cursor_y == i) {
+                    editor->cursor_x -= trimming;
+                }
+
+                int32_t converted_size = WideCharToMultiByte(CP_UTF8, 0, line->text, line->size,
+                    convert_buffer, sizeof(wchar_t) * largest_line_capacity * 4, NULL, NULL);
+                uint32_t bytes_written;
+                WriteFile(file, convert_buffer, converted_size, &bytes_written, NULL);
+                char eol = '\n';
+                WriteFile(file, &eol, 1, &bytes_written, NULL);
+            }
+            free(convert_buffer);
+
+            CloseHandle(file);
+
+            InvalidateRect(hwnd, NULL, false);
+        }
+    }
+
+    if (msg == WM_SIZE) {
+        // Save new window size
+        editor->width = LOWORD(lParam);
+        editor->height = HIWORD(lParam);
+        return 0;
+    }
+
+
+    if (msg == WM_LBUTTONDOWN) {
+        int32_t xPos = GET_X_LPARAM(lParam);
+        int32_t yPos = GET_Y_LPARAM(lParam);
+
+        if (
+            xPos >= editor->line_numbers_width && xPos < editor->width - editor->scrollbar_size &&
+            yPos >= editor->vscroll_viewport - editor->scrollbar_size
+        ) {
+            editor->hscroll_down = true;
             SetCapture(hwnd);
 
-            data->vscroll_offset = (yPos - (data->vscroll_viewport * data->vscroll_viewport / data->vscroll_size / 2)) * data->vscroll_size / data->vscroll_viewport;
+            editor->hscroll_offset = (xPos - (editor->hscroll_viewport * editor->hscroll_viewport / editor->hscroll_size / 2)) * editor->hscroll_size / editor->hscroll_viewport;
 
-            if (data->vscroll_offset < 0) {
-                data->vscroll_offset = 0;
+            if (editor->hscroll_offset + editor->hscroll_viewport > editor->hscroll_size) {
+                editor->hscroll_offset = editor->hscroll_size - editor->hscroll_viewport;
             }
 
-            if (data->vscroll_offset + data->vscroll_viewport > data->vscroll_size) {
-                data->vscroll_offset = data->vscroll_size - data->vscroll_viewport;
+            if (editor->hscroll_offset < 0) {
+                editor->hscroll_offset = 0;
             }
 
-            InvalidateRect(hwnd, NULL, FALSE);
+            InvalidateRect(hwnd, NULL, false);
+            return 0;
+        }
+
+        if (xPos >= editor->width - editor->scrollbar_size) {
+            editor->vscroll_down = true;
+            SetCapture(hwnd);
+
+            editor->vscroll_offset = (yPos - (editor->vscroll_viewport * editor->vscroll_viewport / editor->vscroll_size / 2)) * editor->vscroll_size / editor->vscroll_viewport;
+
+            if (editor->vscroll_offset + editor->vscroll_viewport > editor->vscroll_size) {
+                editor->vscroll_offset = editor->vscroll_size - editor->vscroll_viewport;
+            }
+
+            if (editor->vscroll_offset < 0) {
+                editor->vscroll_offset = 0;
+            }
+
+            InvalidateRect(hwnd, NULL, false);
             return 0;
         }
 
@@ -245,45 +357,46 @@ LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         int xPos = GET_X_LPARAM(lParam);
         int yPos = GET_Y_LPARAM(lParam);
 
-        if (data->hscroll_down && xPos >= data->line_numbers_width && xPos < data->width - data->scrollbar_size) {
-            data->hscroll_offset = (xPos - (data->hscroll_viewport * data->hscroll_viewport / data->hscroll_size / 2)) * data->hscroll_size / data->hscroll_viewport;
+        if (editor->hscroll_down && xPos >= editor->line_numbers_width && xPos < editor->width - editor->scrollbar_size) {
+            editor->hscroll_offset = (xPos - (editor->hscroll_viewport * editor->hscroll_viewport / editor->hscroll_size / 2)) * editor->hscroll_size / editor->hscroll_viewport;
 
-            if (data->hscroll_offset < 0) {
-                data->hscroll_offset = 0;
+            if (editor->hscroll_offset + editor->hscroll_viewport > editor->hscroll_size) {
+                editor->hscroll_offset = editor->hscroll_size - editor->hscroll_viewport;
             }
 
-            if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
-                data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
+            if (editor->hscroll_offset < 0) {
+                editor->hscroll_offset = 0;
             }
 
-            InvalidateRect(hwnd, NULL, FALSE);
+            InvalidateRect(hwnd, NULL, false);
         }
 
-        if (data->vscroll_down && yPos >= 0 && yPos < data->vscroll_viewport) {
-            data->vscroll_offset = (yPos - (data->vscroll_viewport * data->vscroll_viewport / data->vscroll_size / 2)) * data->vscroll_size / data->vscroll_viewport;
+        if (editor->vscroll_down && yPos >= 0 && yPos < editor->vscroll_viewport) {
+            editor->vscroll_offset = (yPos - (editor->vscroll_viewport * editor->vscroll_viewport / editor->vscroll_size / 2)) * editor->vscroll_size / editor->vscroll_viewport;
 
-            if (data->vscroll_offset < 0) {
-                data->vscroll_offset = 0;
+            if (editor->vscroll_offset + editor->vscroll_viewport > editor->vscroll_size) {
+                editor->vscroll_offset = editor->vscroll_size - editor->vscroll_viewport;
             }
 
-            if (data->vscroll_offset + data->vscroll_viewport > data->vscroll_size) {
-                data->vscroll_offset = data->vscroll_size - data->vscroll_viewport;
+            if (editor->vscroll_offset < 0) {
+                editor->vscroll_offset = 0;
             }
 
-            InvalidateRect(hwnd, NULL, FALSE);
+
+            InvalidateRect(hwnd, NULL, false);
         }
 
         return 0;
     }
 
     if (msg == WM_LBUTTONUP) {
-        if (data->hscroll_down) {
-            data->hscroll_down = FALSE;
+        if (editor->hscroll_down) {
+            editor->hscroll_down = false;
             ReleaseCapture();
         }
 
-        if (data->vscroll_down) {
-            data->vscroll_down = FALSE;
+        if (editor->vscroll_down) {
+            editor->vscroll_down = false;
             ReleaseCapture();
         }
 
@@ -291,150 +404,435 @@ LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     }
 
     if (msg == WM_MOUSEWHEEL) {
-        data->vscroll_offset -= GET_WHEEL_DELTA_WPARAM(wParam);
+        editor->vscroll_offset -= GET_WHEEL_DELTA_WPARAM(wParam);
 
-        if (data->vscroll_offset < 0) {
-            data->vscroll_offset = 0;
+        if (editor->vscroll_offset + editor->vscroll_viewport > editor->vscroll_size) {
+            editor->vscroll_offset = editor->vscroll_size - editor->vscroll_viewport;
         }
 
-        if (data->vscroll_offset + data->vscroll_viewport > data->vscroll_size) {
-            data->vscroll_offset = data->vscroll_size - data->vscroll_viewport;
+        if (editor->vscroll_offset < 0) {
+            editor->vscroll_offset = 0;
         }
 
-        InvalidateRect(hwnd, NULL, FALSE);
+        InvalidateRect(hwnd, NULL, false);
         return 0;
     }
 
     if (msg == WM_MOUSEHWHEEL) {
-        data->hscroll_offset += GET_WHEEL_DELTA_WPARAM(wParam);
+        editor->hscroll_offset += GET_WHEEL_DELTA_WPARAM(wParam);
 
-        if (data->hscroll_offset < 0) {
-            data->hscroll_offset = 0;
+        if (editor->hscroll_offset + editor->hscroll_viewport > editor->hscroll_size) {
+            editor->hscroll_offset = editor->hscroll_size - editor->hscroll_viewport;
         }
 
-        if (data->hscroll_offset + data->hscroll_viewport > data->hscroll_size) {
-            data->hscroll_offset = data->hscroll_size - data->hscroll_viewport;
+        if (editor->hscroll_offset < 0) {
+            editor->hscroll_offset = 0;
         }
 
-        InvalidateRect(hwnd, NULL, FALSE);
+        InvalidateRect(hwnd, NULL, false);
         return 0;
     }
 
-    if (msg == WM_SETFONT) {
-        data->font = (HFONT)wParam;
-        HDC hdc = GetDC(hwnd);
-        SelectObject(hdc, data->font);
-        TEXTMETRIC tm;
-        GetTextMetrics(hdc, &tm);
-        data->font_size = tm.tmHeight;
+    if (msg == WM_KEYDOWN) {
+        uint32_t key = (uintptr_t)wParam;
+
+        if (key == VK_LEFT) {
+            if (editor->cursor_x > 0) {
+                editor->cursor_x--;
+            } else if (editor->cursor_y > 0) {
+                editor->cursor_y--;
+                editor->cursor_x = editor->lines[editor->cursor_y]->size;
+            }
+        }
+        if (key == VK_RIGHT) {
+            if (editor->cursor_x < editor->lines[editor->cursor_y]->size) {
+                editor->cursor_x++;
+            } else if (editor->cursor_y < editor->lines_size) {
+                editor->cursor_x = 0;
+                editor->cursor_y++;
+            }
+        }
+        if (key == VK_UP && editor->cursor_y > 0) {
+            editor->cursor_y--;
+            if (editor->cursor_x > editor->lines[editor->cursor_y]->size) {
+                editor->cursor_x = editor->lines[editor->cursor_y]->size;
+            }
+        }
+        if (key == VK_DOWN && editor->cursor_y < editor->lines_size) {
+            editor->cursor_y++;
+            if (editor->cursor_x > editor->lines[editor->cursor_y]->size) {
+                editor->cursor_x = editor->lines[editor->cursor_y]->size;
+            }
+        }
+
+        if (key == VK_BACK) {
+            EditorLine *line = editor->lines[editor->cursor_y];
+            if (editor->cursor_x > 0) {
+                if (editor->cursor_x >= editor->indentation_size) {
+                    bool are_spaces = true;
+                    for (int32_t i = 0; i < editor->indentation_size; i++) {
+                        if (line->text[editor->cursor_x - 1 - i] != ' ') {
+                            are_spaces = false;
+                            break;
+                        }
+                    }
+
+                    if (are_spaces) {
+                        for (int32_t i = 0; i < editor->indentation_size - 1; i++) {
+                            for (int32_t j = editor->cursor_x - 1; j < line->size; j++) {
+                                line->text[j] = line->text[j + 1];
+                            }
+                            line->size--;
+                            editor->cursor_x--;
+                        }
+                    }
+                }
+
+                for (int32_t i = editor->cursor_x - 1; i < line->size; i++) {
+                    line->text[i] = line->text[i + 1];
+                }
+                line->size--;
+                editor->cursor_x--;
+            } else if (editor->cursor_y > 0) {
+                editor->cursor_y--;
+                EditorLine *prev_line = editor->lines[editor->cursor_y];
+                editor->cursor_x = prev_line->size;
+
+                for (int32_t i = 0; i < line->size; i++) {
+                    if (prev_line->size == prev_line->capacity) {
+                        prev_line->capacity *= 2;
+                        prev_line->text = realloc(prev_line->text, sizeof(wchar_t) * prev_line->capacity);
+                    }
+                    prev_line->text[prev_line->size++] = line->text[i];
+                }
+
+                free(line);
+                for (int32_t i = editor->cursor_y + 1; i < editor->lines_size; i++) {
+                    editor->lines[i] = editor->lines[i + 1];
+                }
+                editor->lines_size--;
+            }
+        }
+
+        if (key == VK_DELETE) {
+            EditorLine *line = editor->lines[editor->cursor_y];
+            if (editor->cursor_x < line->size) {
+                if (editor->cursor_x < line->size - editor->indentation_size) {
+                    bool are_spaces = true;
+                    for (int32_t i = 0; i < editor->indentation_size; i++) {
+                        if (line->text[editor->cursor_x + i] != ' ') {
+                            are_spaces = false;
+                            break;
+                        }
+                    }
+
+                    if (are_spaces) {
+                        for (int32_t i = 0; i < editor->indentation_size - 1; i++) {
+                            for (int32_t j = editor->cursor_x; j < line->size; j++) {
+                                line->text[j] = line->text[j + 1];
+                            }
+                            line->size--;
+                        }
+                    }
+                }
+
+                for (int32_t i = editor->cursor_x; i < line->size; i++) {
+                    line->text[i] = line->text[i + 1];
+                }
+                line->size--;
+            } else if (editor->cursor_y < editor->lines_size) {
+                EditorLine *next_line = editor->lines[editor->cursor_y + 1];
+                for (int32_t i = 0; i < next_line->size; i++) {
+                    if (line->size == line->capacity) {
+                        line->capacity *= 2;
+                        line->text = realloc(line->text, sizeof(wchar_t) * line->capacity);
+                    }
+                    line->text[line->size++] = next_line->text[i];
+                }
+
+                free(next_line);
+                for (int32_t i = editor->cursor_y + 1; i < editor->lines_size; i++) {
+                    editor->lines[i] = editor->lines[i + 1];
+                }
+                editor->lines_size--;
+            }
+        }
+
+        if (key == VK_TAB) {
+            if (editor->indentation_character == ' ') {
+                for (int32_t i = 0; i < editor->indentation_size; i++) {
+                    SendMessageW(hwnd, WM_CHAR, (void *)L' ', NULL);
+                }
+            }
+        }
+
+        if (key == VK_RETURN) {
+            EditorLine *line = editor->lines[editor->cursor_y];
+
+            int32_t indentation_amount = 0;
+            while (indentation_amount < line->size && line->text[indentation_amount] == editor->indentation_character) {
+                indentation_amount++;
+            }
+
+            EditorLine *new_line = malloc(sizeof(EditorLine));
+            new_line->capacity = line->capacity;
+            new_line->size = 0;
+            new_line->text = malloc(sizeof(wchar_t) * line->capacity);
+            for (int32_t i = 0; i < indentation_amount; i++) {
+                new_line->text[new_line->size++] = editor->indentation_character;
+            }
+            for (int32_t i = editor->cursor_x; i < line->size; i++) {
+                new_line->text[new_line->size++] = line->text[i];
+            }
+            line->size = editor->cursor_x;
+
+            if (editor->lines_size == editor->lines_capacity) {
+                editor->lines_capacity *= 2;
+                editor->lines = realloc(editor->lines, sizeof(EditorLine *) * editor->lines_capacity);
+            }
+            for (int32_t i = editor->lines_size - 1; i >= editor->cursor_y; i--) {
+                editor->lines[i + 1] = editor->lines[i];
+            }
+
+            editor->lines[++editor->cursor_y] = new_line;
+            editor->lines_size++;
+            editor->cursor_x = indentation_amount;
+        }
+
+        InvalidateRect(hwnd, NULL, false);
         return 0;
     }
 
-    if (msg == WM_GETFONT) {
-        return (LRESULT)data->font;
+    if (msg == WM_CHAR) {
+        wchar_t character = (uintptr_t)wParam;
+        if (
+            // character == '\t' ||
+            (character >= ' ' && character <= '~')) {
+            EditorLine *line = editor->lines[editor->cursor_y];
+
+            if (line->size == line->capacity) {
+                line->capacity *= 2;
+                line->text = realloc(line->text, sizeof(wchar_t) * line->capacity);
+            }
+
+            for (int32_t i = line->size - 1; i >= editor->cursor_x; i--) {
+                line->text[i + 1] = line->text[i];
+            }
+            line->size++;
+            line->text[editor->cursor_x] = character;
+            // if (character == '\t') {
+            //     editor->cursor_x += editor->indentation_size;
+            // } else {
+                editor->cursor_x++;
+            // }
+            InvalidateRect(hwnd, NULL, false);
+        }
+        return 0;
     }
 
     if (msg == WM_ERASEBKGND) {
-        return TRUE;
+        // Draw no background
+        return true;
     }
 
     if (msg == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC hdc;
-        if (wParam == 0) {
-            hdc = BeginPaint(hwnd, &ps);
-        } else {
-            hdc = (HDC)wParam;
-        }
+        UpdateLines(editor);
+        UpdateScroll(editor);
 
-        // Create double buffer
-        HDC hdcMem = CreateCompatibleDC(hdc);
-        HBITMAP hbmMem = CreateCompatibleBitmap(hdc, data->width, data->height);
-        HANDLE hOld = SelectObject(hdcMem, hbmMem);
+        PAINTSTRUCT paint_struct;
+        HDC hdc = BeginPaint(hwnd, &paint_struct);
 
-        // Draw background
-        RECT editor_rect = { 0, 0, data->width, data->height };
-        SetBkColor(hdcMem, data->window_background_color);
-        ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &editor_rect, "", 0, NULL);
+        // Create back buffer
+        HDC hdc_buffer = CreateCompatibleDC(hdc);
+        HBITMAP bitmap_buffer = CreateCompatibleBitmap(hdc, editor->width, editor->height);
+        SelectObject(hdc_buffer, bitmap_buffer);
 
-        // Draw lines
-        SelectObject(hdcMem, data->font);
-        SetBkMode(hdcMem, TRANSPARENT);
-        SetTextColor(hdcMem, data->code_color);
-        for (int i = 0; i < data->lines_count; i++) {
-            int line_size = lstrlen(data->lines[i]);
-            int x = data->line_numbers_width + data->padding - data->hscroll_offset;
-            int y = data->padding + data->font_size * i - data->vscroll_offset;
-            SIZE line_metrics;
-            GetTextExtentPoint(hdcMem, data->lines[i], line_size, &line_metrics);
-            if (
-                x + line_metrics.cx >= data->line_numbers_width && x < data->width &&
-                y + data->font_size >= 0 && y < data->height
-            ) {
-                ExtTextOut(hdcMem, x, y, 0, NULL, data->lines[i], line_size, NULL);
+        // Draw background color
+        HBRUSH background_brush = CreateSolidBrush(editor->background_color);
+        RECT background_rect = { 0, 0, editor->width, editor->height };
+        FillRect(hdc_buffer, &background_rect, background_brush);
+        DeleteObject(background_brush);
+
+        // Draw code lines
+        SelectObject(hdc_buffer, editor->font);
+        SetBkMode(hdc_buffer, TRANSPARENT);
+        SetTextAlign(hdc_buffer, TA_LEFT);
+
+        SIZE measure_size;
+        GetTextExtentPoint32W(hdc, L"0", 1, &measure_size);
+        uint32_t character_width = measure_size.cx + 1;
+
+
+        int32_t largest_line_capacity = editor->lines[0]->capacity;
+        for (int32_t i = 0; i < editor->lines_size; i++) {
+            if (editor->lines[i]->capacity > largest_line_capacity) {
+                largest_line_capacity = editor->lines[i]->capacity;
             }
         }
+        uint8_t *tokens = malloc(largest_line_capacity);
+
+        for (int32_t i = 0; i < editor->lines_size; i++) {
+            EditorLine *line = editor->lines[i];
+            int32_t x = editor->line_numbers_width - editor->hscroll_offset;
+            int32_t y = editor->font_size * i - editor->vscroll_offset;
+            if (
+                y >= -(int32_t)editor->font_size &&
+                y + editor->font_size < editor->height + editor->font_size
+            ) {
+                AssemblyLexer(line, tokens);
+                // CLexer(line, tokens);
+
+                int32_t j = 0;
+                while (j < line->size) {
+                    uint8_t token = tokens[j];
+                    int32_t token_amount = 1;
+                    while (j + token_amount < line->size && tokens[j + token_amount] == token) {
+                        token_amount++;
+                    }
+
+                    if (token == TOKEN_SPACE) {
+                        if (token_amount > 64) {
+                            token_amount = 64;
+                        }
+                        wchar_t spaces[64];
+                        for (int32_t i = 0; i < token_amount; i++) {
+                            spaces[i] = 0x00b7;
+                        }
+                        SetTextColor(hdc_buffer, editor->token_space_text_color);
+                        ExtTextOutW(hdc_buffer, x, y, 0, NULL, spaces, token_amount, NULL);
+                        SIZE measure_size;
+                        GetTextExtentPoint32W(hdc_buffer, spaces, token_amount, &measure_size);
+                        x += measure_size.cx;
+                        j += token_amount;
+                        continue;
+                    }
+
+                    if (token == TOKEN_NORMAL) {
+                        SetTextColor(hdc_buffer, editor->token_normal_text_color);
+                    }
+                    if (token == TOKEN_COMMENT) {
+                        SetTextColor(hdc_buffer, editor->token_comment_text_color);
+                    }
+                    if (token == TOKEN_KEYWORD) {
+                        SetTextColor(hdc_buffer, editor->token_keyword_text_color);
+                    }
+                    if (token == TOKEN_CONSTANT) {
+                        SetTextColor(hdc_buffer, editor->token_constant_text_color);
+                    }
+                    if (token == TOKEN_STRING) {
+                        SetTextColor(hdc_buffer, editor->token_string_text_color);
+                    }
+                    ExtTextOutW(hdc_buffer, x, y, 0, NULL, &line->text[j], token_amount, NULL);
+                    SIZE measure_size;
+                    GetTextExtentPoint32W(hdc_buffer, &line->text[j], token_amount, &measure_size);
+                    x += measure_size.cx;
+                    j += token_amount;
+                }
+            }
+        }
+        free(tokens);
+
+        // Draw cursor
+        HBRUSH cursor_brush = CreateSolidBrush(RGB(255, 0, 0));
+        RECT cursor_rect;
+        cursor_rect.left = editor->line_numbers_width + editor->cursor_x * character_width - editor->hscroll_offset;
+        cursor_rect.top = editor->cursor_y * editor->font_size - editor->vscroll_offset;
+        cursor_rect.right = cursor_rect.left + 2;
+        cursor_rect.bottom = cursor_rect.top + editor->font_size;
+        FillRect(hdc_buffer, &cursor_rect, cursor_brush);
+        DeleteObject(cursor_brush);
 
         // Draw line numbers rect
-        RECT line_numbers_rect = { 0, 0, data->line_numbers_width, data->height };
-        SetBkColor(hdcMem, data->window_background_color);
-        ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &line_numbers_rect, "", 0, NULL);
+        HBRUSH line_numbers_brush = CreateSolidBrush(editor->background_color);
+        RECT line_numbers_rect = { 0, 0, editor->line_numbers_width, editor->height };
+        FillRect(hdc_buffer, &line_numbers_rect, line_numbers_brush);
+        DeleteObject(line_numbers_brush);
 
         // Draw line numbers
-        SetTextColor(hdcMem, data->line_numbers_color);
-        for (int i = 1; i <= data->lines_count; i++) {
-            int y = data->padding + data->font_size * (i - 1) - data->vscroll_offset;
-            if (y + data->font_size >= 0 && y <= data->height) {
-                char string_buffer[16];
-                wsprintf(string_buffer, data->line_numbers_format_string, i);
-                ExtTextOut(hdcMem, data->padding, y, 0, NULL, string_buffer, strlen(string_buffer), NULL);
+        for (int32_t i = 0; i < editor->lines_size; i++) {
+            int32_t y = editor->font_size * i - editor->vscroll_offset;
+            if (
+                y >= -(int32_t)editor->font_size &&
+                y + editor->font_size < editor->height + editor->font_size
+            ) {
+                if (editor->cursor_y == i) {
+                    SetTextColor(hdc_buffer, editor->line_numbers_active_text_color);
+                } else {
+                    SetTextColor(hdc_buffer, editor->line_numbers_text_color);
+                }
+                wchar_t string_buffer[32];
+                if (editor->debug) {
+                    wsprintfW(string_buffer, editor->line_numbers_format, i + 1, editor->lines[i]->size, editor->lines[i]->capacity);
+                } else {
+                    wsprintfW(string_buffer, editor->line_numbers_format, i + 1);
+                }
+                ExtTextOutW(hdc_buffer, editor->padding, y, 0, NULL, string_buffer, wcslen(string_buffer), NULL);
             }
+        }
+
+        if (editor->debug) {
+            // Draw stats
+            SetTextColor(hdc_buffer, editor->line_numbers_text_color);
+            wchar_t string_buffer[32];
+            wsprintfW(string_buffer, L"%d/%d", editor->lines_size, editor->lines_capacity);
+            SetTextAlign(hdc_buffer, TA_RIGHT);
+            ExtTextOutW(hdc_buffer, editor->width - editor->scrollbar_size - editor->padding, 0, 0, NULL, string_buffer, wcslen(string_buffer), NULL);
         }
 
         // Draw horizontal scrollbar
-        if (data->hscroll_size > data->width) {
-            RECT hscrollbar_rect = { data->line_numbers_width, data->height - data->scrollbar_size, data->width - data->scrollbar_size, data->height };
-            SetBkColor(hdcMem, data->scrollbar_background_color);
-            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &hscrollbar_rect, "", 0, NULL);
+        if (editor->hscroll_size > editor->width) {
+            RECT hscrollbar_rect = { editor->line_numbers_width, editor->height - editor->scrollbar_size, editor->width - editor->scrollbar_size, editor->height };
+            HBRUSH hscrollbar_brush = CreateSolidBrush(editor->scrollbar_background_color);
+            FillRect(hdc_buffer, &hscrollbar_rect, hscrollbar_brush);
+            DeleteObject(hscrollbar_brush);
 
-            int x = data->hscroll_viewport * data->hscroll_offset / data->hscroll_size;
-            RECT hscrollbar_thumb_rect = { data->line_numbers_width + x, data->height - data->scrollbar_size, data->line_numbers_width + x + data->hscroll_viewport * data->hscroll_viewport / data->hscroll_size, data->height };
-            SetBkColor(hdcMem, data->scrollbar_thumb_background_color);
-            ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &hscrollbar_thumb_rect, "", 0, NULL);
+            int x = editor->hscroll_viewport * editor->hscroll_offset / editor->hscroll_size;
+            RECT hscrollbar_thumb_rect = { editor->line_numbers_width + x, editor->height - editor->scrollbar_size, editor->line_numbers_width + x + editor->hscroll_viewport * editor->hscroll_viewport / editor->hscroll_size, editor->height };
+            HBRUSH hscrollbar_thumb_brush = CreateSolidBrush(editor->scrollbar_thumb_background_color);
+            FillRect(hdc_buffer, &hscrollbar_thumb_rect, hscrollbar_thumb_brush);
+            DeleteObject(hscrollbar_thumb_brush);
         }
 
         // Draw vertical scrollbar
-        RECT vscrollbar_rect = { data->width - data->scrollbar_size, 0, data->width, data->vscroll_viewport };
-        SetBkColor(hdcMem, data->scrollbar_background_color);
-        ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &vscrollbar_rect, "", 0, NULL);
+        RECT vscrollbar_rect = { editor->width - editor->scrollbar_size, 0, editor->width, editor->vscroll_viewport };
+        HBRUSH vscrollbar_brush = CreateSolidBrush(editor->scrollbar_background_color);
+        FillRect(hdc_buffer, &vscrollbar_rect, vscrollbar_brush);
+        DeleteObject(vscrollbar_brush);
 
-        int y = data->vscroll_viewport * data->vscroll_offset / data->vscroll_size;
-        RECT vscrollbar_thumb_rect = { data->width - data->scrollbar_size, y, data->width, y +data->vscroll_viewport * data->vscroll_viewport / data->vscroll_size };
-        SetBkColor(hdcMem, data->scrollbar_thumb_background_color);
-        ExtTextOut(hdcMem, 0, 0, ETO_OPAQUE, &vscrollbar_thumb_rect, "", 0, NULL);
+        int y = editor->vscroll_viewport * editor->vscroll_offset / editor->vscroll_size;
+        RECT vscrollbar_thumb_rect = { editor->width - editor->scrollbar_size, y, editor->width, y + editor->vscroll_viewport * editor->vscroll_viewport / editor->vscroll_size };
+        HBRUSH vscrollbar_thumb_brush = CreateSolidBrush(editor->scrollbar_thumb_background_color);
+        FillRect(hdc_buffer, &vscrollbar_thumb_rect, vscrollbar_thumb_brush);
+        DeleteObject(vscrollbar_thumb_brush);
 
-        // Blit double buffer
-        BitBlt(hdc, 0, 0, data->width, data->height, hdcMem, 0, 0, SRCCOPY);
-        SelectObject(hdcMem, hOld);
-        DeleteObject(hbmMem);
-        DeleteDC (hdcMem);
+        // Draw and delete back buffer
+        BitBlt(hdc, 0, 0, editor->width, editor->height, hdc_buffer, 0, 0, SRCCOPY);
+        DeleteObject(bitmap_buffer);
+        DeleteDC(hdc_buffer);
 
-        if (wParam == 0) {
-            EndPaint(hwnd, &ps);
-        }
+        EndPaint(hwnd, &paint_struct);
         return 0;
     }
 
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    if (msg == WM_DESTROY) {
+        // Remove GDI objects
+        DeleteObject(editor->font);
+
+        // Free editor data
+        free(editor);
+
+        return 0;
+    }
+
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void InitEditorControl(void) {
-    WNDCLASSEX wc = { 0 };
+    WNDCLASSEXW wc = { 0 };
     wc.cbSize = sizeof(wc);
-    wc.lpszClassName = "plaatcode_editor";
-    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"plaatcode_editor";
+    wc.hInstance = GetModuleHandleW(NULL);
     wc.lpfnWndProc = EditorWndProc;
-    wc.hCursor = LoadCursor (NULL, IDC_ARROW);
-    wc.hbrBackground = NULL;
-    RegisterClassEx(&wc);
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    RegisterClassExW(&wc);
 }

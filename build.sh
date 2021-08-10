@@ -1,12 +1,9 @@
-rm -f plaatcode.exe
-if [ "$1" == "release" ]; then
-    if windres src/resource.rc resource.o; then
-        gcc -s -O2 $(find src -name "*.c") resource.o -lgdi32 -lcomctl32 -Wl,--subsystem,windows -o plaatcode
-        rm resource.o
-    fi
-else
-    if windres -DDEBUG src/resource.rc resource.o; then
-        gcc -g -DDEBUG -Wall -Wextra -Wshadow -Wpedantic --std=c99 $(find src -name "*.c") resource.o -lgdi32 -lcomctl32 -o plaatcode
-        rm resource.o
-    fi
-fi
+./builder.py --clean
+./builder.py
+
+magick convert res/icon.png -define icon:auto-resize="16,32,48,256" res/icon.ico
+windres res/resources.rc -o target/x64/debug/resources.res
+
+cd target/x64/debug
+ResourceHacker -open plaatcode.exe -save plaatcode.exe -action addskip -res resources.res -log NUL
+./plaatcode
