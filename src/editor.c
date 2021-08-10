@@ -1,6 +1,14 @@
 #include "editor.h"
 #include "lexers.h"
 
+// TODO
+Lexer lexers[] = {
+    { L"s", AssemblyLexer },
+    { L"asm", AssemblyLexer },
+    { L"c", CLexer },
+    { L"h", CLexer }
+};
+
 void UpdateLines(EditorData *editor) {
     // Generate line number format string
     int32_t line_number_size = 1;
@@ -100,6 +108,7 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         editor->indentation_size = 4;
 
         editor->path = NULL;
+        editor->extension = NULL;
 
         // Create lines with one empty line
         editor->lines_capacity = 128;
@@ -149,6 +158,7 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
                 free(editor->path);
             }
             editor->path = NULL;
+            editor->extension = NULL;
 
             EditorLine *line = malloc(sizeof(EditorLine));
             line->capacity = 128;
@@ -173,6 +183,12 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
                 free(editor->path);
             }
             editor->path = wcsdup(path);
+            for (int32_t i = wcslen(editor->path); i >= 0; i--) {
+                if (editor->path[i] == '.') {
+                    editor->extension = &editor->path[i + 1];
+                    break;
+                }
+            }
 
             uint32_t file_size = GetFileSize(file, NULL);
             char *file_buffer = malloc(file_size);
@@ -240,6 +256,12 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
             free(editor->path);
         }
         editor->path = wcsdup(path);
+        for (int32_t i = wcslen(editor->path); i >= 0; i--) {
+            if (editor->path[i] == '.') {
+                editor->extension = &editor->path[i + 1];
+                break;
+            }
+        }
     }
 
     if (msg == WM_EDITOR_SAVE_FILE) {
@@ -671,6 +693,14 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         }
         uint8_t *tokens = malloc(largest_line_capacity);
 
+        Lexer *lexer = NULL;
+        for (int32_t i = 0; i < LEXERS_SIZE; i++) {
+            if (!wcscmp(lexers[i].extension, editor->extension)) {
+                lexer = &lexers[i];
+                break;
+            }
+        }
+
         for (int32_t i = 0; i < editor->lines_size; i++) {
             EditorLine *line = editor->lines[i];
             int32_t x = editor->line_numbers_width - editor->hscroll_offset;
@@ -679,8 +709,13 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
                 y >= -(int32_t)editor->font_size &&
                 y + editor->font_size < editor->height + editor->font_size
             ) {
-                AssemblyLexer(line, tokens);
-                // CLexer(line, tokens);
+                if (lexer != NULL) {
+                    lexer->lexer_function(line, tokens);
+                } else {
+                    for (int32_t j = 0; j < line->size; j++) {
+                        tokens[j] = TOKEN_NORMAL;
+                    }
+                }
 
                 int32_t j = 0;
                 while (j < line->size) {

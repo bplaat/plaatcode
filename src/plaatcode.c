@@ -65,7 +65,7 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         window->height = HIWORD(lParam);
 
         // Resize editor control
-        SetWindowPos(window->editor, NULL, 0, 24, window->width, window->height - 24 - 24, SWP_NOZORDER);
+        SetWindowPos(window->editor, NULL, 48, 24, window->width - 48, window->height - 24 - 24, SWP_NOZORDER);
         return 0;
     }
 

@@ -1,3 +1,5 @@
+rm -rf .vscode
+
 ./builder.py --clean
 ./builder.py
 

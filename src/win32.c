@@ -18,6 +18,14 @@ size_t wcslen(wchar_t *string) {
     return string - start - 1;
 }
 
+int32_t wcscmp(wchar_t *wcs1, wchar_t *wcs2) {
+    while (*wcs1 && (*wcs1 == *wcs2)) {
+        wcs1++;
+        wcs2++;
+    }
+    return *wcs1 - *wcs2;
+}
+
 wchar_t *wcscpy(wchar_t *dest, wchar_t *src) {
     wchar_t *start = dest;
     while ((*dest++ = *src++) != '\0');

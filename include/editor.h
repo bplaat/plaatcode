@@ -45,6 +45,7 @@ typedef struct {
     int32_t indentation_size;
 
     wchar_t *path;
+    wchar_t *extension;
     EditorLine **lines;
     int32_t lines_capacity;
     int32_t lines_size;

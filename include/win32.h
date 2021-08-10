@@ -718,6 +718,7 @@ void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
 void free(void *ptr);
 size_t wcslen(wchar_t *string);
+int32_t wcscmp(wchar_t *wcs1, wchar_t *wcs2);
 wchar_t *wcscpy(wchar_t *dest, wchar_t *src);
 wchar_t *wcscat(wchar_t *dest, wchar_t *src);
 wchar_t *wcsdup(wchar_t *src);

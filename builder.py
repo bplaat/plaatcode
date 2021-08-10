@@ -164,10 +164,13 @@ for filename in assembly_files:
         output = output.replace('st\n', 'st0\n')
 
         if arch == 'x64':
+            output = re.sub(r'\s*\.linkonce.*\n', '\n', output)
+            output = re.sub(r'\s*\.linkonce.*\n', '\n', output)
             output = re.sub(r'\s*\.seh_.*\n', '\n', output)
             output = re.sub(r'\.LC([0-9]+)', 'LC\\1', output)
             output = re.sub(r' \[QWORD (.+)\]\n', ' QWORD \\1\n', output)
             output = output.replace('movabs r', 'mov r')
+            output = output.replace('.refptr.', '')
             output = re.sub(r'([a-zA-Z_][a-zA-Z0-9_]*)\[rip\]', '[rel \\1]', output)
             output = output.replace(' XMMWORD ', ' OWORD ')
             output = output.replace('rex.W ', ' ')
