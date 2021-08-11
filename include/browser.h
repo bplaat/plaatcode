@@ -22,8 +22,8 @@ typedef struct {
     int32_t width;
     int32_t height;
 
+    uint32_t background_color;
     uint32_t text_color;
-
     HFONT font;
     wchar_t *font_name;
     int32_t font_size;

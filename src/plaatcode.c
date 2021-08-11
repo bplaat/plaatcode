@@ -11,13 +11,29 @@ wchar_t *window_class_name = L"plaatcode";
     wchar_t *window_title = L"PlaatCode (32-bit)";
 #endif
 
-#define WINDOW_WIDTH 1024
+#define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 768
 #define WINDOW_STYLE WS_OVERLAPPEDWINDOW
 
 typedef struct {
     int32_t width;
     int32_t height;
+
+    uint32_t background_color;
+    uint32_t titlebar_background_color;
+    uint32_t titlebar_text_color;
+    uint32_t statusbar_background_color;
+    uint32_t statusbar_text_color;
+
+    HFONT font;
+    wchar_t *font_name;
+    int32_t font_size;
+
+    int32_t titlebar_height;
+    int32_t titlebar_button_width;
+    int32_t statusbar_height;
+    int32_t statusbar_padding;
+
     HWND browser;
     HWND editor;
 } WindowData;
@@ -34,6 +50,8 @@ void UpdateWindowTitle(HWND hwnd) {
     wcscat(title, L" - ");
     wcscat(title, window_title);
     SendMessageW(hwnd, WM_SETTEXT, NULL, title);
+
+    InvalidateRect(hwnd, NULL, false);
 }
 
 int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam) {
@@ -45,6 +63,23 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, window);
         window->width = WINDOW_WIDTH;
         window->height = WINDOW_HEIGHT;
+
+        // Theming
+        window->background_color = 0x00111111;
+        window->titlebar_background_color = 0x002B2521;
+        window->titlebar_text_color = 0x00ffffff;
+        window->statusbar_background_color = 0x002B2521;
+        window->statusbar_text_color = 0x00ffffff;
+
+        window->font_name = L"Segoe UI";
+        window->font_size = 18;
+        window->font = CreateFontW(window->font_size, 0, 0, 0, FW_NORMAL, false, false, false, ANSI_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, window->font_name);
+
+        window->titlebar_height = 32;
+        window->titlebar_button_width = 48;
+        window->statusbar_height = 24;
+        window->statusbar_padding = 8;
 
         // Add about item to system menu
         HMENU systemMenu = GetSystemMenu(hwnd, false);
@@ -73,7 +108,7 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         SetWindowPos(window->browser, NULL, 0, 24, browser_width, window->height - 24 - 24, SWP_NOZORDER);
 
         // Resize editor control
-        SetWindowPos(window->editor, NULL, browser_width, 24, window->width - browser_width, window->height - 24 - 24, SWP_NOZORDER);
+        SetWindowPos(window->editor, NULL, browser_width, 64, window->width - browser_width, window->height - 32 - 32 - 24, SWP_NOZORDER);
         return 0;
     }
 
@@ -140,7 +175,44 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         DragQueryFileW(hDropInfo, 0, (wchar_t *)path, MAX_PATH);
         DragFinish(hDropInfo);
         SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, (WPARAM)path, NULL);
+        UpdateWindowTitle(hwnd);
         return 0;
+    }
+
+    if (msg == WM_LBUTTONUP) {
+        int32_t x = GET_X_LPARAM(lParam);
+        int32_t y = GET_Y_LPARAM(lParam);
+
+        // Window decoration buttons
+        if (
+            y >= 0 &&
+            y < window->titlebar_height
+        ) {
+            if (
+                x >= window->width - window->titlebar_button_width * 3 &&
+                x < window->width - window->titlebar_button_width  * 2
+            ) {
+                ShowWindow(hwnd, SW_MINIMIZE);
+            }
+
+            if (
+                x >= window->width - window->titlebar_button_width  * 2 &&
+                x < window->width - window->titlebar_button_width  * 1
+            ) {
+                if (IsZoomed(hwnd)) {
+                    ShowWindow(hwnd, SW_RESTORE);
+                } else {
+                    ShowWindow(hwnd, SW_MAXIMIZE);
+                }
+            }
+
+            if (
+                x >= window->width - window->titlebar_button_width  * 1 &&
+                x < window->width
+            ) {
+                DestroyWindow(hwnd);
+            }
+        }
     }
 
     if (msg == WM_KEYDOWN || msg == WM_CHAR) {
@@ -173,10 +245,82 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         SelectObject(hdc_buffer, bitmap_buffer);
 
         // Draw background color
-        HBRUSH brush = CreateSolidBrush(RGB(17, 17, 17));
+        HBRUSH brush = CreateSolidBrush(window->background_color);
         RECT rect = { 0, 0, window->width, window->height };
         FillRect(hdc_buffer, &rect, brush);
         DeleteObject(brush);
+
+        // Draw titlebar
+        {
+            // Draw statusbar
+            HBRUSH header_brush = CreateSolidBrush(window->titlebar_background_color);
+            RECT header_rect = { 0, 0, window->width, window->titlebar_height };
+            FillRect(hdc_buffer, &header_rect, header_brush);
+            DeleteObject(header_brush);
+
+            // Draw title
+            SelectObject(hdc_buffer, window->font);
+            SetBkMode(hdc_buffer, TRANSPARENT);
+            SetTextColor(hdc_buffer, window->titlebar_text_color);
+
+            SetTextAlign(hdc_buffer, TA_CENTER);
+            wchar_t title_buffer[320];
+            SendMessageW(hwnd, WM_GETTEXT, (WPARAM)320, title_buffer);
+            TextOutW(hdc_buffer, window->width / 2, (window->titlebar_height - window->font_size) / 2, title_buffer, wcslen(title_buffer));
+
+            // Draw custom window decoration
+            int32_t x = window->width - window->titlebar_button_width * 3;
+            wchar_t *text = L"\u2581";
+            TextOutW(hdc_buffer, x + window->titlebar_button_width / 2, (window->titlebar_height - window->font_size) / 2, text, wcslen(text));
+            x += window->titlebar_button_width;
+
+            text = IsZoomed(hwnd) ? L"\u25F3" : L"\u25A1";
+            TextOutW(hdc_buffer, x + window->titlebar_button_width / 2, (window->titlebar_height - window->font_size) / 2, text, wcslen(text));
+            x += window->titlebar_button_width;
+
+            text = L"\u2A09";
+            TextOutW(hdc_buffer, x + window->titlebar_button_width / 2, (window->titlebar_height - window->font_size) / 2, text, wcslen(text));
+            x += window->titlebar_button_width;
+        }
+
+        // Draw statusbar
+        {
+            int32_t y = window->height - window->statusbar_height;
+
+            // Draw statusbar
+            HBRUSH statusbar_brush = CreateSolidBrush(window->statusbar_background_color);
+            RECT statusbar_rect = { 0, y, window->width, window->height };
+            FillRect(hdc_buffer, &statusbar_rect, statusbar_brush);
+            DeleteObject(statusbar_brush);
+
+            // Draw some text
+            SelectObject(hdc_buffer, window->font);
+            SetBkMode(hdc_buffer, TRANSPARENT);
+            SetTextColor(hdc_buffer, window->statusbar_text_color);
+
+            SetTextAlign(hdc_buffer, TA_LEFT);
+            wchar_t *text = L"PlaatCode definitely not a bad vscode rip off 🙂";
+            TextOutW(hdc_buffer, window->statusbar_padding, y + (window->statusbar_height - window->font_size) / 2, text, wcslen(text));
+
+            int32_t x = window->width - window->statusbar_padding;
+            SetTextAlign(hdc_buffer, TA_RIGHT);
+
+            text = L"UTF-8";
+            TextOutW(hdc_buffer, x, y + (window->statusbar_height - window->font_size) / 2, text, wcslen(text));
+            x -= 128 - window->statusbar_padding;
+
+            text = L"Windows (CR LF)";
+            TextOutW(hdc_buffer, x, y + (window->statusbar_height - window->font_size) / 2, text, wcslen(text));
+            x -= 128 - window->statusbar_padding;
+
+            text = L"Spaces: 4";
+            TextOutW(hdc_buffer, x, y + (window->statusbar_height - window->font_size) / 2, text, wcslen(text));
+            x -= 128 - window->statusbar_padding;
+
+            text = L"Ln: 1, Col: 1";
+            TextOutW(hdc_buffer, x, y + (window->statusbar_height - window->font_size) / 2, text, wcslen(text));
+            x -= 128 - window->statusbar_padding;
+        }
 
         // Draw and delete back buffer
         BitBlt(hdc, 0, 0, window->width, window->height, hdc_buffer, 0, 0, SRCCOPY);
@@ -188,6 +332,9 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
     }
 
     if (msg == WM_DESTROY) {
+        // Delete GDI objects
+        DeleteObject(window->font);
+
         // Free window data
         free(window);
 

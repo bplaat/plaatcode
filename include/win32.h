@@ -198,7 +198,10 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 
 #define SW_HIDE 0
 #define SW_SHOWNORMAL 1
+#define SW_MAXIMIZE 3
+#define SW_MINIMIZE 6
 #define SW_SHOW 5
+#define SW_RESTORE 9
 #define SW_SHOWDEFAULT 10
 
 #define WM_CREATE 0x0001
@@ -384,6 +387,7 @@ extern HACCEL __stdcall LoadAcceleratorsW(HINSTANCE hInstance, wchar_t *lpTableN
 extern int32_t __stdcall TranslateAcceleratorW(HWND hWnd, HACCEL hAccTable, MSG *lpMsg);
 extern HWND __stdcall SetCapture(HWND hWnd);
 extern bool __stdcall ReleaseCapture(void);
+extern bool __stdcall IsZoomed(HWND hWnd);
 #ifdef WIN64
     extern void * __stdcall SetWindowLongPtrW(HWND hWnd, int32_t nIndex, void *dwNewLong);
     extern void * __stdcall GetWindowLongPtrW(HWND hWnd, int32_t nIndex);

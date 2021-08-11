@@ -82,7 +82,8 @@ libraries = {
         'GetSystemMetrics', 'GetWindowTextW', 'InvalidateRect', 'IsIconic', 'KillTimer', 'LoadBitmapW', 'LoadCursorW', 'LoadIconW',
         'LoadImageW', 'LoadStringW', 'MessageBeep', 'MessageBoxW', 'PeekMessageW', 'PostQuitMessage', 'RegisterClassExW', 'SendMessageW',
         'SetForegroundWindow', 'SetMenu', 'SetTimer', 'SetWindowPos', 'SetWindowTextW', 'ShowWindow', 'TranslateMessage', 'UpdateWindow',
-        'wsprintfW', 'wvsprintfW', 'GetSystemMenu', 'InsertMenuW', 'LoadAcceleratorsW', 'TranslateAcceleratorW', 'SetCapture', 'ReleaseCapture'
+        'wsprintfW', 'wvsprintfW', 'GetSystemMenu', 'InsertMenuW', 'LoadAcceleratorsW', 'TranslateAcceleratorW', 'SetCapture',
+        'ReleaseCapture', 'IsZoomed'
     ],
     'GDI32.DLL': [
         'BitBlt', 'CreateCompatibleBitmap', 'CreateCompatibleDC', 'CreateFontW', 'CreateRectRgn', 'CreateSolidBrush', 'DeleteDC',

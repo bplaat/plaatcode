@@ -51,17 +51,21 @@ int32_t __stdcall Browser_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM
         SelectObject(hdc_buffer, bitmap_buffer);
 
         // Draw background color
-        HBRUSH brush = CreateSolidBrush(0x00342C28);
+        HBRUSH brush = CreateSolidBrush(0x002B2521);
         RECT rect = { 0, 0, browser->width, browser->height };
         FillRect(hdc_buffer, &rect, brush);
         DeleteObject(brush);
 
-        // Draw folder path
+        // Draw explorer text
         SelectObject(hdc_buffer, browser->font);
         SetBkMode(hdc_buffer, TRANSPARENT);
         SetTextColor(hdc_buffer, browser->text_color);
         SetTextAlign(hdc_buffer, TA_LEFT);
-        TextOutW(hdc_buffer, 0, 0, browser->path, wcslen(browser->path));
+        wchar_t *text = L"Explorer";
+        TextOutW(hdc_buffer, 0, (32 - browser->font_size) / 2, text, wcslen(text));
+
+        // Draw folder path
+        TextOutW(hdc_buffer, 0, 32, browser->path, wcslen(browser->path));
 
         // Draw files
         wchar_t folder_path[MAX_PATH];
@@ -71,7 +75,7 @@ int32_t __stdcall Browser_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM
         WIN32_FIND_DATAW file_data;
         HANDLE find_handle = FindFirstFileW(folder_path, &file_data);
         if (find_handle != INVALID_HANDLE_VALUE) {
-            int32_t y = browser->font_size;
+            int32_t y = 32 + browser->font_size;
             do {
                 if (file_data.cFileName[0] == '.' || (file_data.cFileName[0] == '.' && file_data.cFileName[1] == '.')) {
                     continue;
