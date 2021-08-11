@@ -57,7 +57,7 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
 
         // Create editor control
         window->editor = CreateWindowExW(0, L"plaatcode_editor", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd, NULL, NULL, NULL);
-        // SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, L"plaatcode.asm", NULL);
+        SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, L"plaatcode.asm", NULL);
         // SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, L"../../../src/editor.c", NULL);
         UpdateWindowTitle(hwnd);
         return 0;

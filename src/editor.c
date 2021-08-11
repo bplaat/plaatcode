@@ -174,6 +174,10 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
             }
             editor->path = wcsdup(path);
             for (int32_t i = wcslen(editor->path); i >= 0; i--) {
+                if (editor->path[i] == '/' || editor->path[i] == '\\') {
+                    editor->extension = NULL;
+                    break;
+                }
                 if (editor->path[i] == '.') {
                     editor->extension = &editor->path[i + 1];
                     break;
@@ -186,26 +190,25 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
             ReadFile(file, file_buffer, file_size, &bytes_read, 0);
             CloseHandle(file);
 
-            int32_t converted_size = MultiByteToWideChar(CP_ACP, 0, file_buffer, file_size, NULL, 0);
+            int32_t converted_size = MultiByteToWideChar(CP_ACP, 0, file_buffer, bytes_read, NULL, 0);
             wchar_t *converted_buffer = malloc(sizeof(wchar_t) * converted_size);
             MultiByteToWideChar(CP_ACP, 0, file_buffer, bytes_read, converted_buffer, converted_size);
             free(file_buffer);
 
             // Create line
             WcharList *line = WcharList_New(128);
-            wchar_t *current = converted_buffer;
-            while (*current != '\0') {
-                if (*current == '\r') {
-                    current++;
+            for (int32_t i = 0; i < (int32_t)bytes_read; i++) {
+                if (converted_buffer[i] == '\r') {
+                    i++;
                 }
-                if (*current == '\n') {
+                if (converted_buffer[i] == '\n') {
                     List_Add(editor->lines, line);
                     line = WcharList_New(128);
-                    current++;
                 } else {
-                    WcharList_Add(line, *current++);
+                    WcharList_Add(line, converted_buffer[i]);
                 }
             }
+            List_Add(editor->lines, line);
 
             free(converted_buffer);
             editor->hscroll_offset = 0;
@@ -227,11 +230,17 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
         }
         editor->path = wcsdup(path);
         for (int32_t i = wcslen(editor->path); i >= 0; i--) {
+            if (editor->path[i] == '/' || editor->path[i] == '\\') {
+                editor->extension = NULL;
+                break;
+            }
             if (editor->path[i] == '.') {
                 editor->extension = &editor->path[i + 1];
                 break;
             }
         }
+
+        InvalidateRect(hwnd, NULL, false);
     }
 
     if (msg == WM_EDITOR_SAVE_FILE) {
@@ -274,8 +283,11 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
                     convert_buffer, sizeof(wchar_t) * biggest_line->capacity * 4, NULL, NULL);
                 uint32_t bytes_written;
                 WriteFile(file, convert_buffer, converted_size, &bytes_written, NULL);
-                char eol = '\n';
-                WriteFile(file, &eol, 1, &bytes_written, NULL);
+
+                if (i != editor->lines->size - 1) {
+                    char eol = '\n';
+                    WriteFile(file, &eol, 1, &bytes_written, NULL);
+                }
             }
             free(convert_buffer);
 
@@ -433,7 +445,7 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
             WcharList *current_line = editor->lines->items[editor->cursor_y];
             if (editor->cursor_x < current_line->size) {
                 editor->cursor_x++;
-            } else if (editor->cursor_y < editor->lines->size) {
+            } else if (editor->cursor_y < editor->lines->size - 1) {
                 editor->cursor_x = 0;
                 editor->cursor_y++;
             }
@@ -444,7 +456,7 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
                 editor->cursor_x = previous_line->size;
             }
         }
-        if (key == VK_DOWN && editor->cursor_y < editor->lines->size) {
+        if (key == VK_DOWN && editor->cursor_y < editor->lines->size - 1) {
             WcharList *next_line = editor->lines->items[++editor->cursor_y];
             if (editor->cursor_x > next_line->size) {
                 editor->cursor_x = next_line->size;
@@ -498,7 +510,7 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
                     }
                 }
                 WcharList_Remove(current_line, editor->cursor_x);
-            } else if (editor->cursor_y < editor->lines->size) {
+            } else if (editor->cursor_y < editor->lines->size - 1) {
                 WcharList *next_line = editor->lines->items[editor->cursor_y + 1];
                 for (int32_t i = 0; i < next_line->size; i++) {
                     WcharList_Add(current_line, next_line->items[i]);
@@ -523,6 +535,7 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
             int32_t indentation_amount = 0;
             while (
                 indentation_amount < current_line->size &&
+                indentation_amount < editor->cursor_x &&
                 current_line->items[indentation_amount] == editor->indentation_character
             ) {
                 indentation_amount++;
@@ -616,7 +629,11 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
                     lexer->lexer_function(line, tokens);
                 } else {
                     for (int32_t j = 0; j < line->size; j++) {
-                        tokens[j] = TOKEN_NORMAL;
+                        if (line->items[j] == ' ') {
+                            tokens[j] = TOKEN_SPACE;
+                        } else {
+                            tokens[j] = TOKEN_NORMAL;
+                        }
                     }
                 }
 
