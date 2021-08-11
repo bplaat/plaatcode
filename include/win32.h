@@ -78,6 +78,8 @@
 #define CP_ACP 0
 #define CP_UTF8 65001
 
+#define FILE_ATTRIBUTE_DIRECTORY 0x10
+
 typedef struct {
     uint16_t wYear;
     uint16_t wMonth;
@@ -97,6 +99,27 @@ typedef struct {
     uint32_t dwPlatformId;
     wchar_t szCSDVersion[128];
 } OSVERSIONINFOW;
+
+typedef struct {
+    uint32_t dwLowDateTime;
+    uint32_t dwHighDateTime;
+} FILETIME;
+
+typedef struct {
+  uint32_t dwFileAttributes;
+  FILETIME ftCreationTime;
+  FILETIME ftLastAccessTime;
+  FILETIME ftLastWriteTime;
+  uint32_t nFileSizeHigh;
+  uint32_t nFileSizeLow;
+  uint32_t dwReserved0;
+  uint32_t dwReserved1;
+  wchar_t cFileName[MAX_PATH];
+  wchar_t cAlternateFileName[14];
+  uint32_t dwFileType;
+  uint32_t dwCreatorType;
+  uint16_t wFinderFlags;
+} WIN32_FIND_DATAW;
 
 #ifdef __GNUC__
     extern void __stdcall __attribute__((noreturn)) ExitProcess(uint32_t uExitCode);
@@ -135,6 +158,9 @@ extern int32_t __stdcall MultiByteToWideChar(uint32_t CodePage, uint32_t dwFlags
 extern int32_t __stdcall WideCharToMultiByte(uint32_t CodePage, uint32_t dwFlags, const wchar_t *lpWideCharStr,
     int32_t cchWideChar, char *lpMultiByteStr, int32_t cbMultiByte, const char *lpDefaultChar, bool *lpUsedDefaultChar);
 extern uint32_t __stdcall GetFileSize(HANDLE hFile, uint32_t *lpFileSizeHigh);
+extern HANDLE __stdcall FindFirstFileW(const wchar_t *lpFileName, WIN32_FIND_DATAW *lpFindFileData);
+extern bool __stdcall FindNextFileW(HANDLE hFindFile, WIN32_FIND_DATAW *lpFindFileData);
+extern bool __stdcall FindClose(HANDLE hFindFile);
 
 // User32
 #define GET_X_LPARAM(lParam) ((int32_t)(int16_t)LOWORD(lParam))

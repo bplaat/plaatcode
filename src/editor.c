@@ -1,22 +1,25 @@
 #include "editor.h"
+#include "wchar_list.h"
 #include "lexers.h"
 
 // TODO
 Lexer lexers[] = {
-    { L"s", AssemblyLexer },
-    { L"asm", AssemblyLexer },
-    { L"c", CLexer },
-    { L"h", CLexer }
+    { L"s", Lexer_Assembly },
+    { L"asm", Lexer_Assembly },
+    { L"c", Lexer_C },
+    { L"h", Lexer_C }
 };
 
-void UpdateLines(EditorData *editor) {
+// Editor control functions
+void Editor_UpdateLines(EditorData *editor) {
     // Generate line number format string
     int32_t line_number_size = 1;
-    int32_t c = editor->lines_size;
+    int32_t c = editor->lines->size;
     while (c > 10) {
         c /= 10;
         line_number_size++;
     }
+    if (line_number_size < 3) line_number_size = 3;
     if (editor->debug) {
         wsprintfW(editor->line_numbers_format, L"%%0%dd %%03d/%%03d", line_number_size);
     } else {
@@ -38,22 +41,23 @@ void UpdateLines(EditorData *editor) {
     editor->line_numbers_width = editor->padding + (measure_size.cx) + editor->padding;
 }
 
-void UpdateScroll(EditorData *editor) {
+void Editor_UpdateScroll(EditorData *editor) {
     // Calculate horizontal scroll viewport
     editor->hscroll_viewport = editor->width - editor->line_numbers_width - editor->scrollbar_size;
 
     // Calculate horizontal scroll size
-    int32_t largest_line = 0;
-    for (int32_t i = 1; i < editor->lines_size; i++) {
-        if (editor->lines[i]->size > editor->lines[largest_line]->size) {
-            largest_line = i;
+    WcharList *largest_line = editor->lines->items[0];
+    for (int32_t i = 1; i < editor->lines->size; i++) {
+        WcharList *line = editor->lines->items[i];
+        if (line->size > largest_line->size) {
+            largest_line = line;
         }
     }
 
     HDC hdc = GetDC(NULL);
     SelectObject(hdc, editor->font);
     SIZE measure_size;
-    GetTextExtentPoint32W(hdc, editor->lines[largest_line]->text, editor->lines[largest_line]->size, &measure_size);
+    GetTextExtentPoint32W(hdc, largest_line->items, largest_line->size, &measure_size);
     editor->hscroll_size = measure_size.cx + editor->padding;
     DeleteDC(hdc);
 
@@ -70,11 +74,11 @@ void UpdateScroll(EditorData *editor) {
     editor->vscroll_viewport = editor->height;
 
     // Calculate vertical scroll size
-    editor->vscroll_size = editor->font_size * editor->lines_size +
+    editor->vscroll_size = editor->font_size * editor->lines->size +
         (editor->vscroll_viewport - editor->font_size);
 }
 
-int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam) {
+int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam) {
     EditorData *editor = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
 
     if (msg == WM_CREATE) {
@@ -111,15 +115,8 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         editor->extension = NULL;
 
         // Create lines with one empty line
-        editor->lines_capacity = 128;
-        editor->lines_size = 0;
-        editor->lines = malloc(sizeof(EditorLine *) * editor->lines_capacity);
-
-        EditorLine *line = malloc(sizeof(EditorLine));
-        line->capacity = 128;
-        line->size = 0;
-        line->text = malloc(sizeof(wchar_t) * line->capacity);
-        editor->lines[editor->lines_size++] = line;
+        editor->lines = List_New(128);
+        List_Add(editor->lines, WcharList_New(128));
 
         editor->scrollbar_size = 16;
         editor->padding = 16;
@@ -137,16 +134,13 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
 
     if (msg == WM_EDITOR_OPEN_FILE) {
         // Free old lines
-        for (int32_t i = 0; i < editor->lines_size; i++) {
-            free(editor->lines[i]->text);
-            free(editor->lines[i]);
+        for (int32_t i = 0; i < editor->lines->size; i++) {
+            WcharList_Free(editor->lines->items[i]);
         }
-        free(editor->lines);
+        List_Free(editor->lines, NULL); // (void (*)(void *item))WcharList_Free);
 
         // Allocate new lines list
-        editor->lines_capacity = 128;
-        editor->lines_size = 0;
-        editor->lines = malloc(sizeof(EditorLine *) * editor->lines_capacity);
+        editor->lines = List_New(128);
 
         // Reset cursor
         editor->cursor_x = 0;
@@ -160,11 +154,7 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
             editor->path = NULL;
             editor->extension = NULL;
 
-            EditorLine *line = malloc(sizeof(EditorLine));
-            line->capacity = 128;
-            line->size = 0;
-            line->text = malloc(sizeof(wchar_t) * line->capacity);
-            editor->lines[editor->lines_size++] = line;
+            List_Add(editor->lines, WcharList_New(128));
 
             editor->hscroll_offset = 0;
             editor->vscroll_offset = 0;
@@ -202,38 +192,18 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
             free(file_buffer);
 
             // Create line
-            EditorLine *line = malloc(sizeof(EditorLine));
-            line->capacity = 128;
-            line->size = 0;
-            line->text = malloc(sizeof(wchar_t) * line->capacity);
-
+            WcharList *line = WcharList_New(128);
             wchar_t *current = converted_buffer;
             while (*current != '\0') {
                 if (*current == '\r') {
                     current++;
                 }
                 if (*current == '\n') {
-                    // Add line to lines
-                    if (editor->lines_size == editor->lines_capacity) {
-                        editor->lines_capacity *= 2;
-                        editor->lines = realloc(editor->lines, sizeof(EditorLine *) * editor->lines_capacity);
-                    }
-                    editor->lines[editor->lines_size++] = line;
-
-                    // Create a new line
-                    line = malloc(sizeof(EditorLine));
-                    line->capacity = 128;
-                    line->size = 0;
-                    line->text = malloc(sizeof(wchar_t) * line->capacity);
-
+                    List_Add(editor->lines, line);
+                    line = WcharList_New(128);
                     current++;
                 } else {
-                    // Add character to current line
-                    if (line->size == line->capacity) {
-                        line->capacity *= 2;
-                        line->text = realloc(line->text, sizeof(wchar_t) * line->capacity);
-                    }
-                    line->text[line->size++] = *current++;
+                    WcharList_Add(line, *current++);
                 }
             }
 
@@ -268,34 +238,28 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         HANDLE file = CreateFileW(editor->path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (file != INVALID_HANDLE_VALUE) {
             // Insert final empty line
-            if (editor->lines[editor->lines_size - 1]->size > 0) {
-                EditorLine *line = malloc(sizeof(EditorLine));
-                line->capacity = 128;
-                line->size = 0;
-                line->text = malloc(sizeof(wchar_t) * line->capacity);
-                if (editor->lines_size == editor->lines_capacity) {
-                    editor->lines_capacity *= 2;
-                    editor->lines = realloc(editor->lines, sizeof(EditorLine *) * editor->lines_capacity);
-                }
-                editor->lines[editor->lines_size++] = line;
+            WcharList *last_line = editor->lines->items[editor->lines->size - 1];
+            if (last_line->size > 0) {
+                List_Add(editor->lines, WcharList_New(128));
             }
 
             // Count largest line
-            int32_t largest_line_capacity = editor->lines[0]->capacity;
-            for (int32_t i = 0; i < editor->lines_size; i++) {
-                if (editor->lines[i]->capacity > largest_line_capacity) {
-                    largest_line_capacity = editor->lines[i]->capacity;
+            WcharList *biggest_line = editor->lines->items[0];
+            for (int32_t i = 1; i < editor->lines->size; i++) {
+                WcharList *line = editor->lines->items[i];
+                if (line->capacity > biggest_line->capacity) {
+                    biggest_line = line;
                 }
             }
 
-            char *convert_buffer = malloc(sizeof(wchar_t) * largest_line_capacity * 2);
-            for (int32_t i = 0; i < editor->lines_size; i++) {
-                EditorLine *line = editor->lines[i];
+            char *convert_buffer = malloc(sizeof(wchar_t) * biggest_line->capacity * 2);
+            for (int32_t i = 0; i < editor->lines->size; i++) {
+                WcharList *line = editor->lines->items[i];
 
                 // Trim trailing whitespace
                 int32_t trimming = 0;
                 for (int32_t j = line->size - 1; j >= 0; j--) {
-                    if (line->text[j] == ' ') {
+                    if (line->items[j] == ' ') {
                         trimming++;
                     } else {
                         break;
@@ -306,8 +270,8 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
                     editor->cursor_x -= trimming;
                 }
 
-                int32_t converted_size = WideCharToMultiByte(CP_UTF8, 0, line->text, line->size,
-                    convert_buffer, sizeof(wchar_t) * largest_line_capacity * 4, NULL, NULL);
+                int32_t converted_size = WideCharToMultiByte(CP_UTF8, 0, line->items, line->size,
+                    convert_buffer, sizeof(wchar_t) * biggest_line->capacity * 4, NULL, NULL);
                 uint32_t bytes_written;
                 WriteFile(file, convert_buffer, converted_size, &bytes_written, NULL);
                 char eol = '\n';
@@ -322,12 +286,11 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
     }
 
     if (msg == WM_SIZE) {
-        // Save new window size
+        // Save new editor size
         editor->width = LOWORD(lParam);
         editor->height = HIWORD(lParam);
         return 0;
     }
-
 
     if (msg == WM_LBUTTONDOWN) {
         int32_t xPos = GET_X_LPARAM(lParam);
@@ -462,121 +425,87 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
             if (editor->cursor_x > 0) {
                 editor->cursor_x--;
             } else if (editor->cursor_y > 0) {
-                editor->cursor_y--;
-                editor->cursor_x = editor->lines[editor->cursor_y]->size;
+                WcharList *previous_line = editor->lines->items[--editor->cursor_y];
+                editor->cursor_x = previous_line->size;
             }
         }
         if (key == VK_RIGHT) {
-            if (editor->cursor_x < editor->lines[editor->cursor_y]->size) {
+            WcharList *current_line = editor->lines->items[editor->cursor_y];
+            if (editor->cursor_x < current_line->size) {
                 editor->cursor_x++;
-            } else if (editor->cursor_y < editor->lines_size) {
+            } else if (editor->cursor_y < editor->lines->size) {
                 editor->cursor_x = 0;
                 editor->cursor_y++;
             }
         }
         if (key == VK_UP && editor->cursor_y > 0) {
-            editor->cursor_y--;
-            if (editor->cursor_x > editor->lines[editor->cursor_y]->size) {
-                editor->cursor_x = editor->lines[editor->cursor_y]->size;
+            WcharList *previous_line = editor->lines->items[--editor->cursor_y];
+            if (editor->cursor_x > previous_line->size) {
+                editor->cursor_x = previous_line->size;
             }
         }
-        if (key == VK_DOWN && editor->cursor_y < editor->lines_size) {
-            editor->cursor_y++;
-            if (editor->cursor_x > editor->lines[editor->cursor_y]->size) {
-                editor->cursor_x = editor->lines[editor->cursor_y]->size;
+        if (key == VK_DOWN && editor->cursor_y < editor->lines->size) {
+            WcharList *next_line = editor->lines->items[++editor->cursor_y];
+            if (editor->cursor_x > next_line->size) {
+                editor->cursor_x = next_line->size;
             }
         }
 
         if (key == VK_BACK) {
-            EditorLine *line = editor->lines[editor->cursor_y];
+            WcharList *current_line = editor->lines->items[editor->cursor_y];
             if (editor->cursor_x > 0) {
                 if (editor->cursor_x >= editor->indentation_size) {
                     bool are_spaces = true;
                     for (int32_t i = 0; i < editor->indentation_size; i++) {
-                        if (line->text[editor->cursor_x - 1 - i] != ' ') {
+                        if (current_line->items[editor->cursor_x - 1 - i] != ' ') {
                             are_spaces = false;
                             break;
                         }
                     }
-
                     if (are_spaces) {
                         for (int32_t i = 0; i < editor->indentation_size - 1; i++) {
-                            for (int32_t j = editor->cursor_x - 1; j < line->size; j++) {
-                                line->text[j] = line->text[j + 1];
-                            }
-                            line->size--;
-                            editor->cursor_x--;
+                            WcharList_Remove(current_line, --editor->cursor_x);
                         }
                     }
                 }
-
-                for (int32_t i = editor->cursor_x - 1; i < line->size; i++) {
-                    line->text[i] = line->text[i + 1];
-                }
-                line->size--;
-                editor->cursor_x--;
+                WcharList_Remove(current_line, --editor->cursor_x);
             } else if (editor->cursor_y > 0) {
-                editor->cursor_y--;
-                EditorLine *prev_line = editor->lines[editor->cursor_y];
-                editor->cursor_x = prev_line->size;
-
-                for (int32_t i = 0; i < line->size; i++) {
-                    if (prev_line->size == prev_line->capacity) {
-                        prev_line->capacity *= 2;
-                        prev_line->text = realloc(prev_line->text, sizeof(wchar_t) * prev_line->capacity);
-                    }
-                    prev_line->text[prev_line->size++] = line->text[i];
+                WcharList *previous_line = editor->lines->items[--editor->cursor_y];
+                editor->cursor_x = previous_line->size;
+                for (int32_t i = 0; i < current_line->size; i++) {
+                    WcharList_Add(previous_line, current_line->items[i]);
                 }
-
-                free(line);
-                for (int32_t i = editor->cursor_y + 1; i < editor->lines_size; i++) {
-                    editor->lines[i] = editor->lines[i + 1];
-                }
-                editor->lines_size--;
+                List_Remove(editor->lines, editor->cursor_y + 1);
+                WcharList_Free(current_line);
             }
         }
 
         if (key == VK_DELETE) {
-            EditorLine *line = editor->lines[editor->cursor_y];
-            if (editor->cursor_x < line->size) {
-                if (editor->cursor_x < line->size - editor->indentation_size) {
+            WcharList *current_line = editor->lines->items[editor->cursor_y];
+            if (editor->cursor_x < current_line->size) {
+                if (editor->cursor_x < current_line->size - editor->indentation_size) {
                     bool are_spaces = true;
                     for (int32_t i = 0; i < editor->indentation_size; i++) {
-                        if (line->text[editor->cursor_x + i] != ' ') {
+                        if (current_line->items[editor->cursor_x + i] != ' ') {
                             are_spaces = false;
                             break;
                         }
                     }
-
                     if (are_spaces) {
                         for (int32_t i = 0; i < editor->indentation_size - 1; i++) {
-                            for (int32_t j = editor->cursor_x; j < line->size; j++) {
-                                line->text[j] = line->text[j + 1];
-                            }
-                            line->size--;
+                            WcharList_Remove(current_line, editor->cursor_x);
                         }
                     }
                 }
-
-                for (int32_t i = editor->cursor_x; i < line->size; i++) {
-                    line->text[i] = line->text[i + 1];
-                }
-                line->size--;
-            } else if (editor->cursor_y < editor->lines_size) {
-                EditorLine *next_line = editor->lines[editor->cursor_y + 1];
+                WcharList_Remove(current_line, editor->cursor_x);
+            } else if (editor->cursor_y < editor->lines->size) {
+                WcharList *next_line = editor->lines->items[editor->cursor_y + 1];
                 for (int32_t i = 0; i < next_line->size; i++) {
-                    if (line->size == line->capacity) {
-                        line->capacity *= 2;
-                        line->text = realloc(line->text, sizeof(wchar_t) * line->capacity);
-                    }
-                    line->text[line->size++] = next_line->text[i];
+                    WcharList_Add(current_line, next_line->items[i]);
                 }
 
-                free(next_line);
-                for (int32_t i = editor->cursor_y + 1; i < editor->lines_size; i++) {
-                    editor->lines[i] = editor->lines[i + 1];
-                }
-                editor->lines_size--;
+                List_Remove(editor->lines, editor->cursor_y + 1);
+                WcharList_Free(next_line);
             }
         }
 
@@ -589,35 +518,25 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         }
 
         if (key == VK_RETURN) {
-            EditorLine *line = editor->lines[editor->cursor_y];
+            WcharList *current_line = editor->lines->items[editor->cursor_y];
 
             int32_t indentation_amount = 0;
-            while (indentation_amount < line->size && line->text[indentation_amount] == editor->indentation_character) {
+            while (
+                indentation_amount < current_line->size &&
+                current_line->items[indentation_amount] == editor->indentation_character
+            ) {
                 indentation_amount++;
             }
 
-            EditorLine *new_line = malloc(sizeof(EditorLine));
-            new_line->capacity = line->capacity;
-            new_line->size = 0;
-            new_line->text = malloc(sizeof(wchar_t) * line->capacity);
+            WcharList *new_line = WcharList_New(128);
             for (int32_t i = 0; i < indentation_amount; i++) {
-                new_line->text[new_line->size++] = editor->indentation_character;
+                WcharList_Add(new_line, editor->indentation_character);
             }
-            for (int32_t i = editor->cursor_x; i < line->size; i++) {
-                new_line->text[new_line->size++] = line->text[i];
+            for (int32_t i = editor->cursor_x; i < current_line->size; i++) {
+                WcharList_Add(new_line, current_line->items[i]);
             }
-            line->size = editor->cursor_x;
-
-            if (editor->lines_size == editor->lines_capacity) {
-                editor->lines_capacity *= 2;
-                editor->lines = realloc(editor->lines, sizeof(EditorLine *) * editor->lines_capacity);
-            }
-            for (int32_t i = editor->lines_size - 1; i >= editor->cursor_y; i--) {
-                editor->lines[i + 1] = editor->lines[i];
-            }
-
-            editor->lines[++editor->cursor_y] = new_line;
-            editor->lines_size++;
+            current_line->size = editor->cursor_x;
+            List_Insert(editor->lines, ++editor->cursor_y, new_line);
             editor->cursor_x = indentation_amount;
         }
 
@@ -626,41 +545,26 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
     }
 
     if (msg == WM_CHAR) {
-        wchar_t character = (uintptr_t)wParam;
-        if (
-            // character == '\t' ||
-            (character >= ' ' && character <= '~')) {
-            EditorLine *line = editor->lines[editor->cursor_y];
-
-            if (line->size == line->capacity) {
-                line->capacity *= 2;
-                line->text = realloc(line->text, sizeof(wchar_t) * line->capacity);
-            }
-
-            for (int32_t i = line->size - 1; i >= editor->cursor_x; i--) {
-                line->text[i + 1] = line->text[i];
-            }
-            line->size++;
-            line->text[editor->cursor_x] = character;
-            // if (character == '\t') {
-            //     editor->cursor_x += editor->indentation_size;
-            // } else {
-                editor->cursor_x++;
-            // }
+        wchar_t character = (intptr_t)wParam;
+        if (character >= ' ' && character <= '~') {
+            WcharList *line = editor->lines->items[editor->cursor_y];
+            WcharList_Insert(line, editor->cursor_x++, character);
             InvalidateRect(hwnd, NULL, false);
         }
         return 0;
     }
 
+    // Draw no background
     if (msg == WM_ERASEBKGND) {
-        // Draw no background
         return true;
     }
 
     if (msg == WM_PAINT) {
-        UpdateLines(editor);
-        UpdateScroll(editor);
+        // Update stuff
+        Editor_UpdateLines(editor);
+        Editor_UpdateScroll(editor);
 
+        // Start drawing
         PAINTSTRUCT paint_struct;
         HDC hdc = BeginPaint(hwnd, &paint_struct);
 
@@ -675,34 +579,33 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         FillRect(hdc_buffer, &background_rect, background_brush);
         DeleteObject(background_brush);
 
-        // Draw code lines
-        SelectObject(hdc_buffer, editor->font);
-        SetBkMode(hdc_buffer, TRANSPARENT);
-        SetTextAlign(hdc_buffer, TA_LEFT);
-
-        SIZE measure_size;
-        GetTextExtentPoint32W(hdc, L"0", 1, &measure_size);
-        uint32_t character_width = measure_size.cx + 1;
-
-
-        int32_t largest_line_capacity = editor->lines[0]->capacity;
-        for (int32_t i = 0; i < editor->lines_size; i++) {
-            if (editor->lines[i]->capacity > largest_line_capacity) {
-                largest_line_capacity = editor->lines[i]->capacity;
+        // Allocate tokens buffer of right size
+        int32_t largest_line_capacity = ((WcharList *)editor->lines->items[0])->capacity;
+        for (int32_t i = 1; i < editor->lines->size; i++) {
+            WcharList *line = editor->lines->items[i];
+            if (line->capacity > largest_line_capacity) {
+                largest_line_capacity = line->capacity;
             }
         }
         uint8_t *tokens = malloc(largest_line_capacity);
 
+        // Select right language lexer
         Lexer *lexer = NULL;
-        for (int32_t i = 0; i < LEXERS_SIZE; i++) {
-            if (!wcscmp(lexers[i].extension, editor->extension)) {
-                lexer = &lexers[i];
-                break;
+        if (editor->extension != NULL) {
+            for (int32_t i = 0; i < LEXERS_SIZE; i++) {
+                if (!wcscmp(lexers[i].extension, editor->extension)) {
+                    lexer = &lexers[i];
+                    break;
+                }
             }
         }
 
-        for (int32_t i = 0; i < editor->lines_size; i++) {
-            EditorLine *line = editor->lines[i];
+        // Draw code lines
+        SelectObject(hdc_buffer, editor->font);
+        SetBkMode(hdc_buffer, TRANSPARENT);
+        SetTextAlign(hdc_buffer, TA_LEFT);
+        for (int32_t i = 0; i < editor->lines->size; i++) {
+            WcharList *line = editor->lines->items[i];
             int32_t x = editor->line_numbers_width - editor->hscroll_offset;
             int32_t y = editor->font_size * i - editor->vscroll_offset;
             if (
@@ -757,9 +660,9 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
                     if (token == TOKEN_STRING) {
                         SetTextColor(hdc_buffer, editor->token_string_text_color);
                     }
-                    ExtTextOutW(hdc_buffer, x, y, 0, NULL, &line->text[j], token_amount, NULL);
+                    ExtTextOutW(hdc_buffer, x, y, 0, NULL, &line->items[j], token_amount, NULL);
                     SIZE measure_size;
-                    GetTextExtentPoint32W(hdc_buffer, &line->text[j], token_amount, &measure_size);
+                    GetTextExtentPoint32W(hdc_buffer, &line->items[j], token_amount, &measure_size);
                     x += measure_size.cx;
                     j += token_amount;
                 }
@@ -768,6 +671,10 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         free(tokens);
 
         // Draw cursor
+        SIZE measure_size;
+        GetTextExtentPoint32W(hdc, L"0", 1, &measure_size);
+        uint32_t character_width = measure_size.cx + 1;
+
         HBRUSH cursor_brush = CreateSolidBrush(RGB(255, 0, 0));
         RECT cursor_rect;
         cursor_rect.left = editor->line_numbers_width + editor->cursor_x * character_width - editor->hscroll_offset;
@@ -784,7 +691,8 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         DeleteObject(line_numbers_brush);
 
         // Draw line numbers
-        for (int32_t i = 0; i < editor->lines_size; i++) {
+        for (int32_t i = 0; i < editor->lines->size; i++) {
+            WcharList *line = editor->lines->items[i];
             int32_t y = editor->font_size * i - editor->vscroll_offset;
             if (
                 y >= -(int32_t)editor->font_size &&
@@ -797,7 +705,7 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
                 }
                 wchar_t string_buffer[32];
                 if (editor->debug) {
-                    wsprintfW(string_buffer, editor->line_numbers_format, i + 1, editor->lines[i]->size, editor->lines[i]->capacity);
+                    wsprintfW(string_buffer, editor->line_numbers_format, i + 1, line->size, line->capacity);
                 } else {
                     wsprintfW(string_buffer, editor->line_numbers_format, i + 1);
                 }
@@ -805,22 +713,24 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
             }
         }
 
+        // Draw stats when in debug flag is set
         if (editor->debug) {
-            // Draw stats
             SetTextColor(hdc_buffer, editor->line_numbers_text_color);
             wchar_t string_buffer[32];
-            wsprintfW(string_buffer, L"%d/%d", editor->lines_size, editor->lines_capacity);
+            wsprintfW(string_buffer, L"%d/%d", editor->lines->size, editor->lines->capacity);
             SetTextAlign(hdc_buffer, TA_RIGHT);
             ExtTextOutW(hdc_buffer, editor->width - editor->scrollbar_size - editor->padding, 0, 0, NULL, string_buffer, wcslen(string_buffer), NULL);
         }
 
-        // Draw horizontal scrollbar
+        // Draw horizontal scrollbar when needed
         if (editor->hscroll_size > editor->width) {
+            // Draw horizontal scrollbar
             RECT hscrollbar_rect = { editor->line_numbers_width, editor->height - editor->scrollbar_size, editor->width - editor->scrollbar_size, editor->height };
             HBRUSH hscrollbar_brush = CreateSolidBrush(editor->scrollbar_background_color);
             FillRect(hdc_buffer, &hscrollbar_rect, hscrollbar_brush);
             DeleteObject(hscrollbar_brush);
 
+            // Draw horizontal scrollbar thumb
             int x = editor->hscroll_viewport * editor->hscroll_offset / editor->hscroll_size;
             RECT hscrollbar_thumb_rect = { editor->line_numbers_width + x, editor->height - editor->scrollbar_size, editor->line_numbers_width + x + editor->hscroll_viewport * editor->hscroll_viewport / editor->hscroll_size, editor->height };
             HBRUSH hscrollbar_thumb_brush = CreateSolidBrush(editor->scrollbar_thumb_background_color);
@@ -834,6 +744,7 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
         FillRect(hdc_buffer, &vscrollbar_rect, vscrollbar_brush);
         DeleteObject(vscrollbar_brush);
 
+        // Draw vertical scrollbar thumb
         int y = editor->vscroll_viewport * editor->vscroll_offset / editor->vscroll_size;
         RECT vscrollbar_thumb_rect = { editor->width - editor->scrollbar_size, y, editor->width, y + editor->vscroll_viewport * editor->vscroll_viewport / editor->vscroll_size };
         HBRUSH vscrollbar_thumb_brush = CreateSolidBrush(editor->scrollbar_thumb_background_color);
@@ -855,19 +766,19 @@ int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM l
 
         // Free editor data
         free(editor);
-
         return 0;
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-void InitEditorControl(void) {
+void Editor_Register(void) {
+    // Register windows editor control class
     WNDCLASSEXW wc = { 0 };
     wc.cbSize = sizeof(wc);
     wc.lpszClassName = L"plaatcode_editor";
     wc.hInstance = GetModuleHandleW(NULL);
-    wc.lpfnWndProc = EditorWndProc;
+    wc.lpfnWndProc = Editor_WndProc;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     RegisterClassExW(&wc);
 }

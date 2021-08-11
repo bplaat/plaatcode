@@ -74,7 +74,7 @@ libraries = {
         'GetModuleHandleW', 'GetProcAddress', 'GetProcessHeap', 'GetStdHandle', 'GetVersionExW', 'HeapAlloc', 'HeapFree',
         'HeapReAlloc', 'LoadLibraryW', 'LoadResource', 'LockResource', 'ReadFile', 'ReleaseMutex', 'SetFilePointer',
         'SetThreadLocale', 'SetThreadUILanguage', 'SizeofResource', 'Sleep', 'WriteConsoleW', 'WriteFile', 'GetFullPathNameW',
-        'MultiByteToWideChar', 'WideCharToMultiByte', 'GetFileSize'
+        'MultiByteToWideChar', 'WideCharToMultiByte', 'GetFileSize', 'FindFirstFileW', 'FindNextFileW', 'FindClose'
     ],
     'USER32.DLL': [
         'AdjustWindowRectEx', 'BeginPaint', 'CreateWindowExW', 'DefWindowProcW', 'DestroyWindow', 'DispatchMessageW', 'DrawTextW',

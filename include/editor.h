@@ -2,6 +2,7 @@
 #define EDITOR_H
 
 #include "win32.h"
+#include "list.h"
 
 #define WM_EDITOR_OPEN_FILE (WM_USER + 0x0001)
 #define WM_EDITOR_CHANGE_PATH (WM_USER + 0x0002)
@@ -13,12 +14,6 @@
 #define TOKEN_KEYWORD 3
 #define TOKEN_CONSTANT 4
 #define TOKEN_STRING 5
-
-typedef struct {
-    wchar_t *text;
-    int32_t capacity;
-    int32_t size;
-} EditorLine;
 
 typedef struct {
     bool debug;
@@ -46,9 +41,7 @@ typedef struct {
 
     wchar_t *path;
     wchar_t *extension;
-    EditorLine **lines;
-    int32_t lines_capacity;
-    int32_t lines_size;
+    List *lines;
 
     int32_t padding;
     int32_t scrollbar_size;
@@ -69,12 +62,12 @@ typedef struct {
     int32_t cursor_y;
 } EditorData;
 
-void UpdateLines(EditorData *editor);
+void Editor_UpdateLines(EditorData *editor);
 
-void UpdateScroll(EditorData *editor);
+void Editor_UpdateScroll(EditorData *editor);
 
-int32_t __stdcall EditorWndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam);
+int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam);
 
-void InitEditorControl(void);
+void Editor_Register(void);
 
 #endif

@@ -1,10 +1,11 @@
 #include "lexers.h"
+#include "editor.h"
 
 char chartolower(char c) {
     return (c >= 'A' && c <= 'Z') ? c + 32 : c;
 }
 
-void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
+void Lexer_Assembly(WcharList *line, uint8_t *tokens) {
     wchar_t *keywords[] = {
         L"db", L"dw", L"dd", L"dq", L"equ", L"times", L"align",
         L"byte", L"word", L"dword", L"qword",
@@ -26,12 +27,12 @@ void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
 
     int32_t j = 0;
     while (j < line->size) {
-        wchar_t character = line->text[j];
+        wchar_t character = line->items[j];
 
         // Single tokens
         if (
-            j == 0 || line->text[j - 1] == ' ' || line->text[j - 1] == '(' ||
-            line->text[j - 1] == '[' || line->text[j - 1] == '{'
+            j == 0 || line->items[j - 1] == ' ' || line->items[j - 1] == '(' ||
+            line->items[j - 1] == '[' || line->items[j - 1] == '{'
         ) {
             // Keywords
             for (int32_t k = 0; k < (int32_t)(sizeof(keywords) / sizeof(wchar_t *)); k++) {
@@ -39,7 +40,7 @@ void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
                     bool same = true;
                     int32_t keyword_size = wcslen(keywords[k]);
                     for (int32_t l = 0; l < keyword_size; l++) {
-                        if (chartolower(line->text[j + l]) != keywords[k][l]) {
+                        if (chartolower(line->items[j + l]) != keywords[k][l]) {
                             same = false;
                             break;
                         }
@@ -60,7 +61,7 @@ void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
                     (character >= 'a' && character <= 'f') || character == 'x' || character == '-' || character == 'e'
                 )) {
                     tokens[j++] = TOKEN_CONSTANT;
-                    character = line->text[j];
+                    character = line->items[j];
                 }
                 continue;
             }
@@ -70,7 +71,7 @@ void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
         if (character == ' ') {
             while (character == ' ') {
                 tokens[j++] = TOKEN_SPACE;
-                character = line->text[j];
+                character = line->items[j];
             }
             continue;
         }
@@ -81,13 +82,13 @@ void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
         for (int32_t i = 0; i < (int32_t)(sizeof(string_starters) / sizeof(wchar_t)); i++) {
             if (character == string_starters[i]) {
                 tokens[j++] = TOKEN_STRING;
-                character = line->text[j];
+                character = line->items[j];
                 while (j < line->size && character != string_starters[i]) {
                     tokens[j++] = TOKEN_STRING;
-                    character = line->text[j];
+                    character = line->items[j];
                 }
                 tokens[j++] = TOKEN_STRING;
-                character = line->text[j];
+                character = line->items[j];
                 next = true;
                 break;
             }
@@ -109,7 +110,7 @@ void AssemblyLexer(EditorLine *line, uint8_t *tokens) {
     }
 }
 
-void CLexer(EditorLine *line, uint8_t *tokens) {
+void Lexer_C(WcharList *line, uint8_t *tokens) {
     wchar_t *keywords[] = {
         L"auto", L"break", L"case", L"char", L"const", L"continue",
         L"default", L"do", L"double", L"else", L"enum", L"extern",
@@ -126,12 +127,12 @@ void CLexer(EditorLine *line, uint8_t *tokens) {
 
     int32_t j = 0;
     while (j < line->size) {
-        wchar_t character = line->text[j];
+        wchar_t character = line->items[j];
 
         // Single tokens
         if (
-            j == 0 || line->text[j - 1] == ' ' || line->text[j - 1] == '(' ||
-            line->text[j - 1] == '[' || line->text[j - 1] == '{'
+            j == 0 || line->items[j - 1] == ' ' || line->items[j - 1] == '(' ||
+            line->items[j - 1] == '[' || line->items[j - 1] == '{'
         ) {
             // Keywords
             for (int32_t k = 0; k < (int32_t)(sizeof(keywords) / sizeof(wchar_t *)); k++) {
@@ -139,7 +140,7 @@ void CLexer(EditorLine *line, uint8_t *tokens) {
                     bool same = true;
                     int32_t keyword_size = wcslen(keywords[k]);
                     for (int32_t l = 0; l < keyword_size; l++) {
-                        if (line->text[j + l] != keywords[k][l]) {
+                        if (line->items[j + l] != keywords[k][l]) {
                             same = false;
                             break;
                         }
@@ -160,7 +161,7 @@ void CLexer(EditorLine *line, uint8_t *tokens) {
                     (character >= 'a' && character <= 'f') || character == 'x' || character == '-' || character == 'e'
                 )) {
                     tokens[j++] = TOKEN_CONSTANT;
-                    character = line->text[j];
+                    character = line->items[j];
                 }
                 continue;
             }
@@ -170,7 +171,7 @@ void CLexer(EditorLine *line, uint8_t *tokens) {
         if (character == ' ') {
             while (character == ' ') {
                 tokens[j++] = TOKEN_SPACE;
-                character = line->text[j];
+                character = line->items[j];
             }
             continue;
         }
@@ -181,13 +182,13 @@ void CLexer(EditorLine *line, uint8_t *tokens) {
         for (int32_t i = 0; i < (int32_t)(sizeof(string_starters) / sizeof(wchar_t)); i++) {
             if (character == string_starters[i]) {
                 tokens[j++] = TOKEN_STRING;
-                character = line->text[j];
+                character = line->items[j];
                 while (j < line->size && character != string_starters[i]) {
                     tokens[j++] = TOKEN_STRING;
-                    character = line->text[j];
+                    character = line->items[j];
                 }
                 tokens[j++] = TOKEN_STRING;
-                character = line->text[j];
+                character = line->items[j];
                 next = true;
                 break;
             }
@@ -197,7 +198,7 @@ void CLexer(EditorLine *line, uint8_t *tokens) {
         }
 
         // Comments
-        if (j < line->size - 1 && character == '/' && line->text[j + 1] == '/') {
+        if (j < line->size - 1 && character == '/' && line->items[j + 1] == '/') {
             while (j < line->size) {
                 tokens[j++] = TOKEN_COMMENT;
             }

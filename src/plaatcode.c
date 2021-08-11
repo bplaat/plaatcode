@@ -1,4 +1,5 @@
 #include "win32.h"
+#include "browser.h"
 #include "editor.h"
 #include "resources.h"
 
@@ -10,8 +11,6 @@ wchar_t *window_class_name = L"plaatcode";
     wchar_t *window_title = L"PlaatCode (32-bit)";
 #endif
 
-wchar_t *font_name = L"Consolas";
-
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 768
 #define WINDOW_STYLE WS_OVERLAPPEDWINDOW
@@ -19,6 +18,7 @@ wchar_t *font_name = L"Consolas";
 typedef struct {
     int32_t width;
     int32_t height;
+    HWND browser;
     HWND editor;
 } WindowData;
 
@@ -51,9 +51,13 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         InsertMenuW(systemMenu, 5, MF_BYPOSITION | MF_SEPARATOR, NULL, NULL);
         InsertMenuW(systemMenu, 6, MF_BYPOSITION, (HMENU)ID_HELP_ABOUT, L"About");
 
+        // Create browser control
+        window->browser = CreateWindowExW(0, L"plaatcode_browser", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd, NULL, NULL, NULL);
+        SendMessageW(window->browser, WM_BROWSER_OPEN_FOLDER, L"../../..", NULL);
+
         // Create editor control
         window->editor = CreateWindowExW(0, L"plaatcode_editor", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, hwnd, NULL, NULL, NULL);
-        SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, L"plaatcode.asm", NULL);
+        // SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, L"plaatcode.asm", NULL);
         // SendMessageW(window->editor, WM_EDITOR_OPEN_FILE, L"../../../src/editor.c", NULL);
         UpdateWindowTitle(hwnd);
         return 0;
@@ -64,8 +68,12 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         window->width = LOWORD(lParam);
         window->height = HIWORD(lParam);
 
+        // Resize browser control
+        int32_t browser_width = 240;
+        SetWindowPos(window->browser, NULL, 0, 24, browser_width, window->height - 24 - 24, SWP_NOZORDER);
+
         // Resize editor control
-        SetWindowPos(window->editor, NULL, 48, 24, window->width - 48, window->height - 24 - 24, SWP_NOZORDER);
+        SetWindowPos(window->editor, NULL, browser_width, 24, window->width - browser_width, window->height - 24 - 24, SWP_NOZORDER);
         return 0;
     }
 
@@ -197,7 +205,8 @@ void _start(void) {
     icc.dwICC = ICC_WIN95_CLASSES;
     InitCommonControlsEx(&icc);
 
-    InitEditorControl();
+    Browser_Register();
+    Editor_Register();
 
     WNDCLASSEXW wc = {0};
     wc.cbSize = sizeof(WNDCLASSEXW);
