@@ -24,6 +24,7 @@
 #define HGLOBAL HANDLE
 #define HACCEL HANDLE
 #define HDROP HANDLE
+#define HMONITOR HANDLE
 #define WPARAM void *
 #define LPARAM void *
 
@@ -189,9 +190,13 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 #define WS_VISIBLE 0x010000000
 #define WS_BORDER 0x000800000
 #define WS_OVERLAPPEDWINDOW 0x00CF0000
+#define WS_CAPTION 0x00C00000
 #define WS_THICKFRAME 0x000040000
-#define WS_MAXIMIZEBOX 0x000010000
+#define WS_MAXIMIZEBOX 0x00010000
+#define WS_MINIMIZEBOX 0x00020000
 #define WS_CLIPCHILDREN 0x02000000
+#define WS_SYSMENU 0x00080000
+#define WS_POPUP 0x80000000
 
 #define WS_EX_ACCEPTFILES 0x00000010
 #define WS_EX_CLIENTEDGE 0x00000200
@@ -207,6 +212,7 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 #define WM_CREATE 0x0001
 #define WM_DESTROY 0x0002
 #define WM_SIZE 0x0005
+#define WM_ACTIVATE 0x0006
 #define WM_SETTEXT 0x000C
 #define WM_GETTEXT 0x000D
 #define WM_GETTEXTLENGTH 0x000E
@@ -215,6 +221,10 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 #define WM_ERASEBKGND 0x0014
 #define WM_GETMINMAXINFO 0x0024
 #define WM_SETFONT 0x0030
+#define WM_NCCALCSIZE 0x0083
+#define WM_NCHITTEST 0x0084
+#define WM_NCPAINT 0x0085
+#define WM_NCACTIVATE 0x0086
 #define WM_KEYDOWN 0x100
 #define WM_CHAR 0x0102
 #define WM_COMMAND 0x0111
@@ -226,6 +236,7 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 #define WM_MOUSEWHEEL 0x020A
 #define WM_MOUSEHWHEEL 0x020E
 #define WM_DROPFILES 0x0233
+#define WM_MOUSELEAVE 0x02A3
 #define WM_USER 0x0400
 
 #define VK_BACK 0x08
@@ -243,6 +254,8 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 
 #define SM_CXSCREEN 0
 #define SM_CYSCREEN 1
+#define SM_CXSIZEFRAME 32
+#define SM_CYSIZEFRAME 33
 #define SM_CXSMICON 49
 #define SM_CYSMICON 50
 
@@ -281,6 +294,21 @@ extern bool __stdcall FindClose(HANDLE hFindFile);
 #define MF_BYPOSITION 0x00000400
 #define MF_SEPARATOR 0x00000800
 
+#define HTTRANSPARENT -1
+#define HTNOWHERE 0
+#define HTCLIENT 1
+#define HTCAPTION 2
+#define HTLEFT 10
+#define HTRIGHT 11
+#define HTTOP 12
+#define HTTOPLEFT 13
+#define HTTOPRIGHT 14
+#define HTBOTTOM 15
+#define HTBOTTOMLEFT 16
+#define HTBOTTOMRIGHT 17
+
+#define MONITOR_DEFAULTTONULL 0x00000000
+
 typedef struct {
     uint32_t cbSize;
     uint32_t style;
@@ -297,20 +325,20 @@ typedef struct {
 } WNDCLASSEXW;
 
 typedef struct {
-    uint32_t cx;
-    uint32_t cy;
+    int32_t cx;
+    int32_t cy;
 } SIZE;
 
 typedef struct {
-    uint32_t left;
-    uint32_t top;
-    uint32_t right;
-    uint32_t bottom;
+    int32_t left;
+    int32_t top;
+    int32_t right;
+    int32_t bottom;
 } RECT;
 
 typedef struct {
-  uint32_t x;
-  uint32_t y;
+  int32_t x;
+  int32_t y;
 } POINT;
 
 typedef struct {
@@ -340,6 +368,38 @@ typedef struct {
   uint8_t rgbReserved[32];
 } PAINTSTRUCT;
 
+typedef struct {
+    HWND hwnd;
+    HWND hwndInsertAfter;
+    int32_t x;
+    int32_t y;
+    int32_t cx;
+    int32_t cy;
+    uint32_t flags;
+} WINDOWPOS;
+
+typedef struct {
+  RECT rgrc[3];
+  WINDOWPOS *lppos;
+} NCCALCSIZE_PARAMS;
+
+typedef struct {
+    uint32_t cbSize;
+    RECT rcMonitor;
+    RECT rcWork;
+    uint32_t dwFlags;
+} MONITORINFO;
+
+typedef struct {
+    uint32_t length;
+    uint32_t flags;
+    uint32_t showCmd;
+    POINT ptMinPosition;
+    POINT ptMaxPosition;
+    RECT rcNormalPosition;
+    RECT rcDevice;
+} WINDOWPLACEMENT;
+
 extern int32_t __stdcall MessageBoxW(HWND hWnd, wchar_t *lpText, wchar_t *lpCaption, uint32_t uType);
 extern void __stdcall PostQuitMessage(int32_t nExitCode);
 extern int32_t __stdcall DefWindowProcW(HWND hWnd, uint32_t Msg, WPARAM wParam, LPARAM lParam);
@@ -356,6 +416,7 @@ extern bool __stdcall GetMessageW(MSG *lpMsg, HWND hWnd, uint32_t wMsgFilterMin,
 extern bool __stdcall PeekMessageW(MSG *lpMsg, HWND hWnd, uint32_t wMsgFilterMin, uint32_t wMsgFilterMax, uint32_t wRemoveMsg);
 extern bool __stdcall TranslateMessage(const MSG *lpMsg);
 extern int32_t __stdcall DispatchMessageW(const MSG *lpMsg);
+extern bool __stdcall GetWindowRect(HWND hWnd, RECT *lpRect);
 extern bool __stdcall GetClientRect(HWND hWnd, RECT *lpRect);
 extern int32_t __stdcall GetSystemMetrics(int32_t nIndex);
 extern bool __stdcall AdjustWindowRectEx(RECT *lpRect, uint32_t dwStyle, bool bMenu, uint32_t dwExStyle);
@@ -387,7 +448,9 @@ extern HACCEL __stdcall LoadAcceleratorsW(HINSTANCE hInstance, wchar_t *lpTableN
 extern int32_t __stdcall TranslateAcceleratorW(HWND hWnd, HACCEL hAccTable, MSG *lpMsg);
 extern HWND __stdcall SetCapture(HWND hWnd);
 extern bool __stdcall ReleaseCapture(void);
-extern bool __stdcall IsZoomed(HWND hWnd);
+extern HMONITOR __stdcall MonitorFromWindow(HWND hwnd, uint32_t dwFlags);
+extern bool __stdcall GetMonitorInfoW(HMONITOR hMonitor, MONITORINFO *lpmi);
+extern bool __stdcall GetWindowPlacement(HWND hWnd, WINDOWPLACEMENT *lpwndpl);
 #ifdef WIN64
     extern void * __stdcall SetWindowLongPtrW(HWND hWnd, int32_t nIndex, void *dwNewLong);
     extern void * __stdcall GetWindowLongPtrW(HWND hWnd, int32_t nIndex);
@@ -579,6 +642,16 @@ extern bool __stdcall PlaySoundW(wchar_t *pszSound, HMODULE hmod, uint32_t fdwSo
 
 // Advapi
 extern bool __stdcall GetUserNameW(wchar_t *lpBuffer, uint32_t *pcbBuffer);
+
+// Dwmapi
+typedef struct {
+    int32_t cxLeftWidth;
+    int32_t cxRightWidth;
+    int32_t cyTopHeight;
+    int32_t cyBottomHeight;
+} MARGINS;
+
+extern int32_t __stdcall DwmExtendFrameIntoClientArea(HWND hWnd, const MARGINS *pMarInset);
 
 // Com
 #define SUCCEEDED(hr) ((int32_t)(hr) >= 0)

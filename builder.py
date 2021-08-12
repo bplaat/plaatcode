@@ -78,12 +78,12 @@ libraries = {
     ],
     'USER32.DLL': [
         'AdjustWindowRectEx', 'BeginPaint', 'CreateWindowExW', 'DefWindowProcW', 'DestroyWindow', 'DispatchMessageW', 'DrawTextW',
-        'EndPaint', 'EnumChildWindows', 'FillRect', 'FindWindowW', 'FrameRect', 'GetClientRect', 'GetDC', 'GetDlgItem', 'GetMessageW',
+        'EndPaint', 'EnumChildWindows', 'FillRect', 'FindWindowW', 'FrameRect', 'GetWindowRect', 'GetClientRect', 'GetDC', 'GetDlgItem', 'GetMessageW',
         'GetSystemMetrics', 'GetWindowTextW', 'InvalidateRect', 'IsIconic', 'KillTimer', 'LoadBitmapW', 'LoadCursorW', 'LoadIconW',
         'LoadImageW', 'LoadStringW', 'MessageBeep', 'MessageBoxW', 'PeekMessageW', 'PostQuitMessage', 'RegisterClassExW', 'SendMessageW',
         'SetForegroundWindow', 'SetMenu', 'SetTimer', 'SetWindowPos', 'SetWindowTextW', 'ShowWindow', 'TranslateMessage', 'UpdateWindow',
         'wsprintfW', 'wvsprintfW', 'GetSystemMenu', 'InsertMenuW', 'LoadAcceleratorsW', 'TranslateAcceleratorW', 'SetCapture',
-        'ReleaseCapture', 'IsZoomed'
+        'ReleaseCapture', 'MonitorFromWindow', 'GetMonitorInfoW', 'GetWindowPlacement'
     ],
     'GDI32.DLL': [
         'BitBlt', 'CreateCompatibleBitmap', 'CreateCompatibleDC', 'CreateFontW', 'CreateRectRgn', 'CreateSolidBrush', 'DeleteDC',
@@ -109,6 +109,9 @@ libraries = {
         'GdipCreateFromHDC', 'GdipCreatePen1', 'GdipCreateSolidFill', 'GdipDeleteBrush', 'GdipDeleteGraphics', 'GdipDeletePen',
         'GdipDrawRectangle', 'GdipDrawRectangleI', 'GdipFillRectangle', 'GdipFillRectangleI', 'GdipGraphicsClear', 'GdipSetSmoothingMode',
         'GdiplusShutdown', 'GdiplusStartup'
+    ],
+    'dwmapi.dll': [
+        'DwmExtendFrameIntoClientArea'
     ],
     'd2d1.dll': [
         'D2D1CreateFactory'

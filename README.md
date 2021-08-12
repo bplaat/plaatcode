@@ -13,7 +13,6 @@ A simple code editor made by PlaatSoft for Windows
     - Index dirs
     - Draw handle collapsing folders
 - window
-    - Custom window decoration
     - Custom menu's
 - tabs
 - hex editor (bin files)

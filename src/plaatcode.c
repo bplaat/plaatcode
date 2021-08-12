@@ -13,15 +13,18 @@ wchar_t *window_class_name = L"plaatcode";
 
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 768
-#define WINDOW_STYLE WS_OVERLAPPEDWINDOW
+#define WINDOW_STYLE (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN)
 
 typedef struct {
     int32_t width;
     int32_t height;
 
     uint32_t background_color;
-    uint32_t titlebar_background_color;
-    uint32_t titlebar_text_color;
+    uint32_t titlebar_active_background_color;
+    uint32_t titlebar_inactive_background_color;
+    uint32_t titlebar_active_text_color;
+    uint32_t titlebar_inactive_text_color;
+    uint32_t titlebar_hover_background_color;
     uint32_t statusbar_background_color;
     uint32_t statusbar_text_color;
 
@@ -36,6 +39,11 @@ typedef struct {
 
     HWND browser;
     HWND editor;
+
+    bool active;
+    bool minimize_hover;
+    bool maximize_hover;
+    bool close_hover;
 } WindowData;
 
 void UpdateWindowTitle(HWND hwnd) {
@@ -66,8 +74,14 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
 
         // Theming
         window->background_color = 0x00111111;
-        window->titlebar_background_color = 0x002B2521;
-        window->titlebar_text_color = 0x00ffffff;
+        window->titlebar_active_background_color = 0x002B2521;
+        window->titlebar_active_text_color = 0x00B4A59D;
+        window->titlebar_inactive_background_color = 0x002B2521;
+        window->titlebar_inactive_text_color = 0x00B4A59D;
+        window->titlebar_hover_background_color = ((window->titlebar_active_background_color & 0xff) + 0x17) |
+            ((((window->titlebar_active_background_color >> 8) & 0xff) + 0x17) << 8) |
+            ((((window->titlebar_active_background_color >> 16) & 0xff) + 0x17) << 16);
+
         window->statusbar_background_color = 0x002B2521;
         window->statusbar_text_color = 0x00ffffff;
 
@@ -80,6 +94,11 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         window->titlebar_button_width = 48;
         window->statusbar_height = 24;
         window->statusbar_padding = 8;
+
+        window->active = true;
+        window->minimize_hover = false;
+        window->maximize_hover = false;
+        window->close_hover = false;
 
         // Add about item to system menu
         HMENU systemMenu = GetSystemMenu(hwnd, false);
@@ -98,6 +117,88 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         return 0;
     }
 
+    if (msg == WM_ACTIVATE) {
+        MARGINS borderless = { 1, 1, 1, 1 };
+        DwmExtendFrameIntoClientArea(hwnd, &borderless);
+        return 0;
+    }
+
+    if (msg == WM_NCACTIVATE) {
+        window->active = wParam;
+        InvalidateRect(hwnd, NULL, false);
+    }
+
+    if (msg == WM_NCCALCSIZE) {
+        if (wParam) {
+            WINDOWPLACEMENT placement;
+            GetWindowPlacement(hwnd, &placement);
+            if (placement.showCmd == SW_MAXIMIZE) {
+                NCCALCSIZE_PARAMS *params = lParam;
+                HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+                if (!monitor) return 0;
+                MONITORINFO monitor_info;
+                monitor_info.cbSize = sizeof(MONITORINFO);
+                if (!GetMonitorInfoW(monitor, &monitor_info)) {
+                    return 0;
+                }
+                params->rgrc[0] = monitor_info.rcWork;
+            }
+        }
+        return 0;
+    }
+
+    if (msg == WM_NCHITTEST) {
+        int32_t x = GET_X_LPARAM(lParam);
+        int32_t y = GET_Y_LPARAM(lParam);
+
+        RECT window_rect;
+        GetWindowRect(hwnd, &window_rect);
+
+        int32_t border_horizontal = GetSystemMetrics(SM_CXSIZEFRAME);
+        int32_t border_vertical = GetSystemMetrics(SM_CYSIZEFRAME);
+
+        if (y >= window_rect.top && y < window_rect.bottom) {
+            if (x >= window_rect.left && x < window_rect.left + border_horizontal) {
+                if (y < window_rect.top + border_vertical) {
+                    return HTTOPLEFT;
+                }
+                if (y > window_rect.bottom - border_vertical) {
+                    return HTBOTTOMLEFT;
+                }
+                return HTLEFT;
+            }
+            if (x >= window_rect.right - border_horizontal && x < window_rect.right) {
+                if (y < window_rect.top + border_vertical) {
+                    return HTTOPRIGHT;
+                }
+                if (y > window_rect.bottom - border_vertical) {
+                    return HTBOTTOMRIGHT;
+                }
+                return HTRIGHT;
+            }
+        }
+
+        if (x >= window_rect.left && x < window_rect.right) {
+            if (y >= window_rect.top && y < window_rect.top + border_vertical) {
+                return HTTOP;
+            }
+            if (y >= window_rect.bottom - border_vertical && y < window_rect.bottom) {
+                return HTBOTTOM;
+            }
+        }
+
+        if (x >= window_rect.left && y >= window_rect.top && x < window_rect.right && y < window_rect.bottom) {
+            x -= window_rect.left;
+            y -= window_rect.top;
+            if (y < window->titlebar_height && x < window->width - window->titlebar_button_width * 3) {
+                return HTCAPTION;
+            }
+            return HTCLIENT;
+        }
+
+        return HTNOWHERE;
+    }
+
     if (msg == WM_SIZE) {
         // Save new window size
         window->width = LOWORD(lParam);
@@ -109,6 +210,14 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
 
         // Resize editor control
         SetWindowPos(window->editor, NULL, browser_width, 64, window->width - browser_width, window->height - 32 - 32 - 24, SWP_NOZORDER);
+        return 0;
+    }
+
+    if (msg == WM_GETMINMAXINFO) {
+        // Set window min size
+        MINMAXINFO *minMaxInfo = (MINMAXINFO *)lParam;
+        minMaxInfo->ptMinTrackSize.x = 640;
+        minMaxInfo->ptMinTrackSize.y = 480;
         return 0;
     }
 
@@ -179,31 +288,35 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
         return 0;
     }
 
+
     if (msg == WM_LBUTTONUP) {
         int32_t x = GET_X_LPARAM(lParam);
         int32_t y = GET_Y_LPARAM(lParam);
 
         // Window decoration buttons
-        if (
-            y >= 0 &&
-            y < window->titlebar_height
-        ) {
+        if (y >= 0 && y < window->titlebar_height) {
             if (
                 x >= window->width - window->titlebar_button_width * 3 &&
                 x < window->width - window->titlebar_button_width  * 2
             ) {
                 ShowWindow(hwnd, SW_MINIMIZE);
+                window->minimize_hover = false;
+                ReleaseCapture();
             }
 
             if (
                 x >= window->width - window->titlebar_button_width  * 2 &&
                 x < window->width - window->titlebar_button_width  * 1
             ) {
-                if (IsZoomed(hwnd)) {
+                WINDOWPLACEMENT placement;
+                GetWindowPlacement(hwnd, &placement);
+                if (placement.showCmd == SW_MAXIMIZE) {
                     ShowWindow(hwnd, SW_RESTORE);
                 } else {
                     ShowWindow(hwnd, SW_MAXIMIZE);
                 }
+                window->maximize_hover = false;
+                ReleaseCapture();
             }
 
             if (
@@ -211,22 +324,57 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
                 x < window->width
             ) {
                 DestroyWindow(hwnd);
+                window->close_hover = false;
+                ReleaseCapture();
             }
         }
+        return 0;
+    }
+
+    if (msg == WM_MOUSEMOVE) {
+        int32_t x = GET_X_LPARAM(lParam);
+        int32_t y = GET_Y_LPARAM(lParam);
+
+        // Window decoration buttons
+        bool new_minimize_hover = window->minimize_hover;
+        bool new_maximize_hover = window->minimize_hover;
+        bool new_close_hover = window->close_hover;
+        if (y >= 0 && y < window->titlebar_height) {
+            new_minimize_hover = x >= window->width - window->titlebar_button_width * 3 &&
+                x < window->width - window->titlebar_button_width  * 2;
+
+            new_maximize_hover = x >= window->width - window->titlebar_button_width  * 2 &&
+                x < window->width - window->titlebar_button_width  * 1;
+
+            new_close_hover = x >= window->width - window->titlebar_button_width  * 1 &&
+                    x < window->width;
+        } else {
+            new_minimize_hover = false;
+            new_maximize_hover = false;
+            new_close_hover = false;
+        }
+
+        if (
+            new_minimize_hover != window->minimize_hover ||
+            new_maximize_hover != window->maximize_hover ||
+            new_close_hover != window->close_hover
+        ) {
+            window->minimize_hover = new_minimize_hover;
+            window->maximize_hover = new_maximize_hover;
+            window->close_hover = new_close_hover;
+
+            if (window->minimize_hover || window->maximize_hover || window->close_hover) {
+                SetCapture(hwnd);
+            } else {
+                ReleaseCapture();
+            }
+            InvalidateRect(hwnd, NULL, false);
+        }
+        return 0;
     }
 
     if (msg == WM_KEYDOWN || msg == WM_CHAR) {
         SendMessageW(window->editor, msg, wParam, lParam);
-        return 0;
-    }
-
-    if (msg == WM_GETMINMAXINFO) {
-        // Set window min size
-        MINMAXINFO *minMaxInfo = (MINMAXINFO *)lParam;
-        RECT window_rect = { 0, 0, 640, 480 };
-        AdjustWindowRectEx(&window_rect, WINDOW_STYLE, true, 0);
-        minMaxInfo->ptMinTrackSize.x = window_rect.right - window_rect.left;
-        minMaxInfo->ptMinTrackSize.y = window_rect.bottom - window_rect.top;
         return 0;
     }
 
@@ -252,8 +400,8 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
 
         // Draw titlebar
         {
-            // Draw statusbar
-            HBRUSH header_brush = CreateSolidBrush(window->titlebar_background_color);
+            // Draw titlebar
+            HBRUSH header_brush = CreateSolidBrush(window->active ? window->titlebar_active_background_color : window->titlebar_inactive_background_color);
             RECT header_rect = { 0, 0, window->width, window->titlebar_height };
             FillRect(hdc_buffer, &header_rect, header_brush);
             DeleteObject(header_brush);
@@ -261,7 +409,7 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
             // Draw title
             SelectObject(hdc_buffer, window->font);
             SetBkMode(hdc_buffer, TRANSPARENT);
-            SetTextColor(hdc_buffer, window->titlebar_text_color);
+            SetTextColor(hdc_buffer, window->active ? window->titlebar_active_text_color : window->titlebar_inactive_text_color);
 
             SetTextAlign(hdc_buffer, TA_CENTER);
             wchar_t title_buffer[320];
@@ -269,18 +417,42 @@ int32_t __stdcall WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM lParam)
             TextOutW(hdc_buffer, window->width / 2, (window->titlebar_height - window->font_size) / 2, title_buffer, wcslen(title_buffer));
 
             // Draw custom window decoration
+            SetTextColor(hdc_buffer, window->active ? 0x00ffffff : 0x00aaaaaa);
+
+            // Minimize button
             int32_t x = window->width - window->titlebar_button_width * 3;
-            wchar_t *text = L"\u2581";
+            if (window->minimize_hover) {
+                HBRUSH brush = CreateSolidBrush(window->titlebar_hover_background_color);
+                RECT rect = { x, 0, x + window->titlebar_button_width, window->titlebar_height };
+                FillRect(hdc_buffer, &rect, brush);
+                DeleteObject(brush);
+            }
+            wchar_t *text = L"🗕";
             TextOutW(hdc_buffer, x + window->titlebar_button_width / 2, (window->titlebar_height - window->font_size) / 2, text, wcslen(text));
             x += window->titlebar_button_width;
 
-            text = IsZoomed(hwnd) ? L"\u25F3" : L"\u25A1";
+            // Maximize button
+            if (window->maximize_hover) {
+                HBRUSH brush = CreateSolidBrush(window->titlebar_hover_background_color);
+                RECT rect = { x, 0, x + window->titlebar_button_width, window->titlebar_height };
+                FillRect(hdc_buffer, &rect, brush);
+                DeleteObject(brush);
+            }
+            WINDOWPLACEMENT placement;
+            GetWindowPlacement(hwnd, &placement);
+            text = placement.showCmd == SW_MAXIMIZE ? L"🗗" : L"🗖";
             TextOutW(hdc_buffer, x + window->titlebar_button_width / 2, (window->titlebar_height - window->font_size) / 2, text, wcslen(text));
             x += window->titlebar_button_width;
 
-            text = L"\u2A09";
+            // Close button
+            if (window->close_hover) {
+                HBRUSH brush = CreateSolidBrush(window->titlebar_hover_background_color);
+                RECT rect = { x, 0, x + window->titlebar_button_width, window->titlebar_height };
+                FillRect(hdc_buffer, &rect, brush);
+                DeleteObject(brush);
+            }
+            text = L"🗙";
             TextOutW(hdc_buffer, x + window->titlebar_button_width / 2, (window->titlebar_height - window->font_size) / 2, text, wcslen(text));
-            x += window->titlebar_button_width;
         }
 
         // Draw statusbar
@@ -363,7 +535,7 @@ void _start(void) {
     wc.hIcon = LoadImageW(wc.hInstance, (wchar_t *)ID_ICON, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_DEFAULTCOLOR | LR_SHARED);
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     wc.lpszClassName = window_class_name;
-    wc.lpszMenuName = (HMENU)ID_MENU;
+    // wc.lpszMenuName = (HMENU)ID_MENU;
     wc.hIconSm = LoadImageW(wc.hInstance, (wchar_t *)ID_ICON, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR | LR_SHARED);
     RegisterClassExW(&wc);
 
@@ -372,7 +544,6 @@ void _start(void) {
     window_rect.top = (GetSystemMetrics(SM_CYSCREEN) - WINDOW_HEIGHT) / 2;
     window_rect.right = window_rect.left + WINDOW_WIDTH;
     window_rect.bottom = window_rect.top + WINDOW_HEIGHT;
-    AdjustWindowRectEx(&window_rect, WINDOW_STYLE, true, 0);
 
     HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, window_class_name, window_title,
         WINDOW_STYLE, window_rect.left, window_rect.top,

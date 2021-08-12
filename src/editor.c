@@ -304,6 +304,10 @@ int32_t __stdcall Editor_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM 
         return 0;
     }
 
+    if (msg == WM_NCHITTEST) {
+        return HTTRANSPARENT;
+    }
+
     if (msg == WM_LBUTTONDOWN) {
         int32_t xPos = GET_X_LPARAM(lParam);
         int32_t yPos = GET_Y_LPARAM(lParam);

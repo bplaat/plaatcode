@@ -41,6 +41,10 @@ int32_t __stdcall Browser_WndProc(HWND hwnd, uint32_t msg, WPARAM wParam, LPARAM
         return 0;
     }
 
+    if (msg == WM_NCHITTEST) {
+        return HTTRANSPARENT;
+    }
+
     if (msg == WM_PAINT) {
         PAINTSTRUCT paint_struct;
         HDC hdc = BeginPaint(hwnd, &paint_struct);
